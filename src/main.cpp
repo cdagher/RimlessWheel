@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_LSM6DS.h>
 #include <HardwareSerial.h>
 #include <ODriveArduino.h>
 
@@ -9,8 +11,8 @@ template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(a
 
 
 // Teensy 3 and 4 (all versions) - Serial1
-// pin 0: RX - connect to ODrive TX
-// pin 1: TX - connect to ODrive RX
+// pin 0: RX - connect to ODrive TX (GPIO1)
+// pin 1: TX - connect to ODrive RX (GPIO2)
 // See https://www.pjrc.com/teensy/td_uart.html for other options on Teensy
 HardwareSerial &odrive_serial = Serial1;
 
@@ -49,6 +51,9 @@ void setup() {
 }
 
 void loop() {
+
+  while (!Serial) ; // as an e-stop kind of thing, but not very responsive
+
   sinusoidalMove(0);
   delay(100);
   sinusoidalMove(1);
