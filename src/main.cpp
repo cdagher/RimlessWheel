@@ -33,6 +33,10 @@ void setup() {
   while (!Serial) ; // wait for USB connection
 
   Serial.println("ODrive Motor Testing");
+
+  odrive_serial << "r vbus_voltage\n";
+  Serial << "Vbus voltage: " << odrive.readFloat() << '\n';
+
   Serial.println("Setting parameters...");
 
   // set the parameters for both motors
