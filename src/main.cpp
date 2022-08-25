@@ -1,14 +1,15 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include <Adafruit_LSM6DS.h>
 #include <HardwareSerial.h>
 #include <ODriveArduino.h>
-
 
 // print stream operator helper functions
 template<class T> inline Print& operator <<(Print &obj,     T arg) { obj.print(arg);    return obj; }
 template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(arg, 4); return obj; }
 
+
+#define MOTOR_VELOCITY_LIMIT 10.0 // radians per second?
+#define MOTOR_CURRENT_LIMIT  20.0 // amps
 
 // Teensy 3 and 4 (all versions) - Serial1
 // pin 0: RX - connect to ODrive TX (GPIO1)
@@ -21,18 +22,14 @@ ODriveArduino odrive(odrive_serial);
 
 
 void calibrateMotor(bool motor);
-void sinusoidalMove(bool motor);
-void sinusoidalMove();
 
 void setup() {
-  // ODrive uses 115200 as the baudrate
+    // ODrive uses 115200 as the baudrate
   odrive_serial.begin(115200);
 
   // Serial output over USB
   Serial.begin(115200);
   while (!Serial) ; // wait for USB connection
-
-  Serial.println("ODrive Motor Testing");
 
   odrive_serial << "r vbus_voltage\n";
   Serial << "Vbus voltage: " << odrive.readFloat() << '\n';
@@ -41,8 +38,8 @@ void setup() {
 
   // set the parameters for both motors
   for (int axis = 0; axis < 2; ++axis) {
-    odrive_serial << "w axis" << axis << ".controller.config.vel_limit " << 10.0f << '\n';
-    odrive_serial << "w axis" << axis << ".motor.config.current_lim " << 11.0f << '\n';
+    odrive_serial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
+    odrive_serial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
     // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
   }
 
@@ -51,20 +48,10 @@ void setup() {
   calibrateMotor(1);
 
   Serial.println("Ready!");
-
 }
 
-void loop() {
+void main() {
 
-  while (!Serial) ; // as an e-stop kind of thing, but not very responsive
-
-  sinusoidalMove(0);
-  delay(100);
-  sinusoidalMove(1);
-  delay(500);
-
-  sinusoidalMove();
-  delay(1000);
 }
 
 void calibrateMotor(bool motornum) {
@@ -82,22 +69,4 @@ void calibrateMotor(bool motornum) {
   requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL;
   Serial << "Axis" << c << ": Requesting state " << requested_state << '\n';
   if(!odrive.run_state(motornum, requested_state, false /*don't wait*/)) return;
-}
-
-void sinusoidalMove(bool motor) {
-  for (float ph = 0.0f; ph < 6.28318530718f; ph += 0.01f) {
-    float pos = 2.0f * sin(ph);
-    odrive.SetPosition(motor, pos);
-    delay(5);
-  }
-}
-
-void sinusoidalMove() {
-  for (float ph = 0.0f; ph < 6.28318530718f; ph += 0.01f) {
-    float pos_m0 = 2.0f * cos(ph);
-    float pos_m1 = 2.0f * sin(ph);
-    odrive.SetPosition(0, pos_m0);
-    odrive.SetPosition(1, pos_m1);
-    delay(5);
-  }
 }
