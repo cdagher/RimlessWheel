@@ -20,11 +20,11 @@ HardwareSerial &odrive_serial = Serial1;
 ODriveArduino odrive(odrive_serial);
 
 
-void calibrateMotor(bool motor);
+void calibrate(bool motor);
 void sinusoidalMove(bool motor);
 void sinusoidalMove();
 
-void setup() {
+void testSetup() {
   // ODrive uses 115200 as the baudrate
   odrive_serial.begin(115200);
 
@@ -47,14 +47,14 @@ void setup() {
   }
 
   // calibrate the motors
-  calibrateMotor(0);
-  calibrateMotor(1);
+  calibrate(0);
+  calibrate(1);
 
   Serial.println("Ready!");
 
 }
 
-void loop() {
+void testLoop() {
 
   while (!Serial) ; // as an e-stop kind of thing, but not very responsive
 
@@ -67,7 +67,7 @@ void loop() {
   delay(1000);
 }
 
-void calibrateMotor(bool motornum) {
+void calibrate(bool motornum) {
   char c = motornum+'0';
   int requested_state;
 
