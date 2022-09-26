@@ -118,6 +118,8 @@ void populateSensorStates() {
         accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, // accelerometer values
         gyro.gyro.x, gyro.gyro.y, gyro.gyro.z // gyroscope values
         };
+
+    sensorStates.position = sensorStateVals;
 }
 
 void calibrateMotor(bool motornum) {
