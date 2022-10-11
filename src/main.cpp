@@ -13,6 +13,7 @@ template<class T> inline Print& operator <<(Print &obj,     T arg) { obj.print(a
 template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(arg, 4); return obj; }
 
 
+// #define USE_TEENSY_HW_SERIAL // for using a hardware serial port w/ ROS
 #define MOTOR_SUBSCRIBER_NAME "/motors"
 #define ENCODER_PUBLISHER_NAME "/sensors"
 
@@ -68,6 +69,7 @@ void setup() {
   Serial.begin(115200);
   while (!Serial) ; // wait for USB connection
 
+  // TODO: figure out why this returns zero. Maybe the ODrive needs a FW update?
   odriveSerial << "r vbus_voltage\n";
   Serial << "Vbus voltage: " << ODrive.readFloat() << '\n';
 
@@ -98,6 +100,9 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
     // { torque0, velocity0, torque1, velocity1 }
     // where the 1st two values are for motor 0 and the 2nd two are for motor 1.
     // One of these values per motor should be zero, and will be ignored
+
+    // IF ALL VALUES RECEIVED ARE ZERO, STOP MOTORS
+    // If one motor receives all zeros and the other doesn't, stop the motor with zeros
     return;
 }
 
