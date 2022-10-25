@@ -1,0 +1,8 @@
+<launch>
+
+<node pkg="julia_controller" type="run.sh" name="controller" output="screen">
+    <env name="JULIA_PROJECT" value="$(find julia_controller)/src" />
+    <env name="SAVED_WEIGHT_DIR" value="$(find ml_based_controllers)/src/saved_weights" />
+</node> 
+
+</launch>

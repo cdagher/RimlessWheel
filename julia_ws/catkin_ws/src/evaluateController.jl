@@ -1,4 +1,4 @@
-using MLBasedESC, MLBasedESCZoo, DiffEqFlux
+using DiffEqFlux
 using LinearAlgebra, BSON
 using RobotOS
 
@@ -18,7 +18,7 @@ unn  = FastChain(FastDense(6, 8, elu),
 
 inputLayer(x) = [cos(x[3]), sin(x[3]), cos(x[4]), sin(x[4]), x[7], x[8]]
 
-ps = BSON.@load "nnController_viaLCP_6-8-8-5-5-1elu.bson"
+ps = BSON.load("nnController_viaLCP_6-8-8-5-5-1elu.bson")[:param]
 
 function initialState(θ0, θ0dot, ϕ0, ϕ0dot)
     @assert pi-α <= θ0 <= pi+α "Give an initial spoke angle for the spoke in contact. This will help set the rimless wheel in contact with the surface"
@@ -44,19 +44,15 @@ function main()
     @info "ROS node initialized. Loading models..."
 
     x0 = initialState(pi, -1.0f0, 0.0f0, 0.0f0)
-    effort = unn(inputLayer(x0), ps)[1]
+    torque = unn(inputLayer(x0), ps)[1]
 
     @info "Model loaded. Spinning ROS..."
     loop_rate = Rate(800.0)
     while !is_shutdown()
         header = std_msgs.msg.Header()
         header.stamp = RobotOS.now()
-        effort = compute_control(state, policy)
-        gear_ratio = 1.0
-        eta = 0.98
-        k_tau = 0.230    # N-m/a
-        current = effort / gear_ratio / k_tau / eta
-        cmd = Float64Msg(current)
+        torque = compute_control(state, policy)
+        cmd = Float64Msg(torque)
         publish(pub, cmd)
         rossleep(loop_rate)
     end

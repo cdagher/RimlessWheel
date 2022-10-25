@@ -5,7 +5,7 @@
 #include <Wire.h>
 #include <HardwareSerial.h>
 #include <Adafruit_LSM6DSOX.h>
-#include "Adafruit_Sensor_Calibration.h"
+
 
 // print stream operator helper functions
 template<class T> inline Print& operator <<(Print &obj,     T arg) { obj.print(arg);    return obj; }
