@@ -5,23 +5,21 @@ class TeensySubscriberCallBack{
 
     public: 
         float torsoState[2];
-        float wheelState[2];
-    
-    private: 
+        float spokeState[4];
 
-        void getSensorStates(sensorStates) {
+        void getSensorStates(const sensor_msgs::JointState &sensorStates) {
 
-            torsoState[1] = sensorStates.position[1]
-            torsoState[2] = sensorStates.position[2]
+            torsoState[1] = sensorStates.position[1];
+            torsoState[2] = sensorStates.velocity[1];
+            spokeState[1] = sensorStates.position[2];
+            spokeState[2] = sensorStates.position[3];
+            spokeState[3] = sensorStates.velocity[2];
+            spokeState[4] = sensorStates.velocity[3];
 
-            //TODO: get orientation from IMU directly.
-            // float sensorStateVals[8] = 
-            //     {
-            //     encPos0, encPos1, // encoder values
-            //     accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, // accelerometer values
-            //     gyro.gyro.x, gyro.gyro.y, gyro.gyro.z // gyroscope values
-            //     };
+        }   
 
-        }    
+        void isTurning(){
+            
+        } 
 
 };
