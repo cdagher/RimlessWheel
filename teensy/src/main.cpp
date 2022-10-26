@@ -54,7 +54,7 @@ Adafruit_Mahony filter;  // fastest/smalleset
 
 #define FILTER_UPDATE_RATE_HZ 100
 #define PRINT_EVERY_N_UPDATES 10
-//#define AHRS_DEBUG_OUTPUT
+#define AHRS_DEBUG_OUTPUT
 
 const float samplingTime = 1.0/FILTER_UPDATE_RATE_HZ;
 float oldTorsoAngle = -999;
@@ -93,7 +93,7 @@ void setup() {
   Wire.setClock(400000); // 400KHz
   
   // ODrive uses 115200 as the baudrate
-  odriveSerial.begin(115200);
+  // odriveSerial.begin(115200);
 
   // TODO: figure out why this returns zero. Maybe the ODrive needs a FW update?
   odriveSerial << "r vbus_voltage\n";
@@ -102,15 +102,15 @@ void setup() {
   Serial.println("Setting parameters...");
 
   // set the parameters for both motors
-  for (int axis = 0; axis < 2; ++axis) {
-    odriveSerial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
-    odriveSerial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
-    // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
-  }
+  // for (int axis = 0; axis < 2; ++axis) {
+  //   odriveSerial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
+  //   odriveSerial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
+  //   // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
+  // }
 
   // calibrate the motors
-  calibrateMotor(0);
-  calibrateMotor(1);
+  // calibrateMotor(0);
+  // calibrateMotor(1);
 
   //Keep track of time to sample the encoders and the IMU evenly
   timestamp = millis();
@@ -144,12 +144,11 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
 }
 
 
+
 void publishSensorStates() {
 
   float encPos0 = 0.0;
   float encPos1 = 0.0;
-
-  float torsoRoll, torsoPitch, torsoHeading;
   float gx, gy, gz;
 
   sensors_event_t accel, gyro, mag;
@@ -171,40 +170,31 @@ void publishSensorStates() {
                 accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, 
                 mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
 
-  torsoRoll    = filter.getRoll();
-  torsoPitch   = filter.getPitch();
-  torsoHeading = filter.getYaw();
+  float torsoRoll    = filter.getRoll();
+  float torsoHeading = filter.getYaw();
+  float torsoPitch   = filter.getPitch();
 
   //Update torso angular velocity
-  float torsoOmega =  (torsoPitch - oldTorsoAngle)/samplingTime;
-  oldTorsoAngle = torsoPitch;
+  float torsoOmega = gy;
+  // float torsoOmega =  (torsoPitch - oldTorsoAngle)/samplingTime;
+  // oldTorsoAngle = torsoPitch;
 
   //Read encoder from ODrive
   // encPos0 = ODrive.GetPosition(0);
   // encPos1 = ODrive.GetPosition(1);
 
   float spoke1Omega = (encPos0 - oldSpoke1Angle)/samplingTime;
-  oldSpoke1Angle = encPos0;
+  oldSpoke1Angle    = encPos0;
   float spoke2Omega = (encPos1 - oldSpoke2Angle)/samplingTime;
-  oldSpoke2Angle =  encPos1; 
+  oldSpoke2Angle    = encPos1; 
 
 #if defined(AHRS_DEBUG_OUTPUT)
-  // Serial.print("Raw: ");
-  // Serial.print(accel.acceleration.x, 4); Serial.print(", ");
-  // Serial.print(accel.acceleration.y, 4); Serial.print(", ");
-  // Serial.print(accel.acceleration.z, 4); Serial.print(", ");
-  // Serial.print(gx, 4); Serial.print(", ");
-  // Serial.print(gy, 4); Serial.print(", ");
-  // Serial.print(gz, 4); Serial.print(", ");
-  // Serial.print(mag.magnetic.x, 4); Serial.print(", ");
-  // Serial.print(mag.magnetic.y, 4); Serial.print(", ");
-  // Serial.print(mag.magnetic.z, 4); Serial.println("");
   Serial.print("Orientation: ");
-  Serial.print(heading);
+  Serial.print(torsoHeading);
   Serial.print(", ");
-  Serial.print(pitch);
+  Serial.print(torsoPitch);
   Serial.print(", ");
-  Serial.println(roll);
+  Serial.println(torsoRoll);
 #endif
 
   sensorStates.position_length = 3;
