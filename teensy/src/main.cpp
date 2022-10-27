@@ -143,8 +143,6 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
     return;
 }
 
-
-
 void publishSensorStates() {
 
   float encPos0 = 0.0;
@@ -175,9 +173,9 @@ void publishSensorStates() {
   float torsoPitch   = filter.getPitch();
 
   //Update torso angular velocity
-  float torsoOmega = gy;
-  // float torsoOmega =  (torsoPitch - oldTorsoAngle)/samplingTime;
-  // oldTorsoAngle = torsoPitch;
+  float torsoOmega = gx * 1.0 / SENSORS_RADS_TO_DPS;
+  // float torsoOmega =  (torsoRoll - oldTorsoAngle)/samplingTime;
+  // oldTorsoAngle = torsoRoll;
 
   //Read encoder from ODrive
   // encPos0 = ODrive.GetPosition(0);
@@ -198,9 +196,10 @@ void publishSensorStates() {
 #endif
 
   sensorStates.position_length = 3;
+  sensorStates.velocity_length = 3;
   float sensorPosition[3] = 
       {
-      torsoPitch, encPos0, encPos1,
+      torsoRoll, encPos0, encPos1,
       };
   float sensorVelocity[3] = 
       {

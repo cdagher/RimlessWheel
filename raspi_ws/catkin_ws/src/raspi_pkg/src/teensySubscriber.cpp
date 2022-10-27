@@ -1,5 +1,3 @@
-#include <sensor_msgs/JointState.h>
-
 
 class TeensySubscriberCallBack{
 
@@ -7,14 +5,15 @@ class TeensySubscriberCallBack{
         float torsoState[2];
         float spokeState[4];
 
-        void getSensorStates(const sensor_msgs::JointState &sensorStates) {
+        void getSensorStates(const sensor_msgs::JointState &msg) {
 
-            torsoState[1] = sensorStates.position[1];
-            torsoState[2] = sensorStates.velocity[1];
-            spokeState[1] = sensorStates.position[2];
-            spokeState[2] = sensorStates.position[3];
-            spokeState[3] = sensorStates.velocity[2];
-            spokeState[4] = sensorStates.velocity[3];
+            auto positions = msg.position;
+            torsoState[1] = msg.position[1];
+            torsoState[2] = msg.velocity[1];
+            spokeState[1] = msg.position[2];
+            spokeState[2] = msg.position[3];
+            spokeState[3] = msg.velocity[2];
+            spokeState[4] = msg.velocity[3];
 
         }   
 

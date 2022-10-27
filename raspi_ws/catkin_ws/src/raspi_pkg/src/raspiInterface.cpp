@@ -1,19 +1,24 @@
 #include "ros/ros.h"
-#include "teesySubscriber.cpp"
+#include <sensor_msgs/JointState.h>
+#include "teensySubscriber.cpp"
+#include <cstdio>
 
-int main(int argc, char* argv[]){
+//RaspiInterface allows one to control the rimeless wheel with joystick or trained controller.
+//It acts as a bridge between control command generator and teensy
 
-    teensyCb = TeensySubscriberCallBack();
-    ros::init(argc, argv, "raspi");
+int main(int argc, char **argv){
+
+    TeensySubscriberCallBack teensyCb;
+    ros::init(argc, argv, "raspi_pkg_node");
+    printf("Starting node");
     ros::NodeHandle nh;
-    ros::Subscriber sub = n.subscribe("/sensors", 1000, &teensyCb.getSensorStates);
+    ros::Subscriber sub = nh.subscribe("sensors", 1000, &TeensySubscriberCallBack::getSensorStates, &teensyCb);
     
     //TODO: receive torque through ROS bridge
     //First publish any joint state in your PC's terminal "rostopic pub -r 10 /torque sensor_msgs/JointState  '{effort:  {0.0}'"
     //On raspi side, subscribe to /torque " rostopic sub /torque ...."
-    //THen add ros bridge  subscribing to this file.
+    //Then add ros bridge  subscribing to this file.
     //TO launch, call "roslaunch raspi_ws raspi.launch"
-    
     ros::spin();
 
     return 0;
