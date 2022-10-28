@@ -7,6 +7,7 @@
 #include <ODriveArduino.h>
 #include <Adafruit_Sensor_Calibration.h>
 #include <Adafruit_AHRS.h>
+#include <cassert> 
 
 Adafruit_Sensor *accelerometer, *gyroscope, *magnetometer;
 
@@ -18,11 +19,12 @@ template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(a
 
 
 // #define USE_TEENSY_HW_SERIAL // for using a hardware serial port w/ ROS
-#define MOTOR_SUBSCRIBER_NAME "/motors"
+#define MOTOR_SUBSCRIBER_NAME "/torso_command"
 #define ENCODER_PUBLISHER_NAME "/sensors"
 
 #define MOTOR_VELOCITY_LIMIT 10.0 // radians per second? Maybe rotations per second?
 #define MOTOR_CURRENT_LIMIT  20.0 // amps
+
 
 ros::NodeHandle nh;
 
@@ -133,6 +135,13 @@ void loop() {
 
 void receiveJointState(const sensor_msgs::JointState &msg) {
 
+    float torque = msg.effort[0];
+    float velocity = msg.velocity[0];
+
+    assert( torque == 0.0 || velocity == 0.0);
+    ODrive.SetVelocity(0, velocity);
+    ODrive.SetVelocity(1, velocity);
+
     // TODO: actually write this method
     // received joint state should be something like:
     // { torque0, velocity0, torque1, velocity1 }
@@ -182,6 +191,10 @@ void publishSensorStates() {
   //Read encoder from ODrive
   // encPos0 = ODrive.GetPosition(0);
   // encPos1 = ODrive.GetPosition(1);
+
+  //TODO: test GetVelocity
+  float encVel0 = ODrive.GetVelocity(0);
+  float encVel1 = ODrive.GetVelocity(1);
 
   float spoke1Omega = (encPos0 - oldSpoke1Angle)/samplingTime;
   oldSpoke1Angle    = encPos0;

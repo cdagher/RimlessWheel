@@ -13,7 +13,6 @@ void joystickCb(const boost::shared_ptr<geometry_msgs::Twist const> msg, ros::Pu
     //populate the content of joystickCommand (AKA joystickCommand.effort) from what you 
     //receive through ros bridge
     sensor_msgs::JointState joystickCommand;
-    joystickCommand.name="velocity control"
     joystickCommand.velocity.resize(1);
     joystickCommand.velocity[0] = {msg->angular.z};
     pub.publish(joystickCommand);

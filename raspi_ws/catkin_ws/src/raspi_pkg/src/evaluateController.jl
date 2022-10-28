@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 using Pkg
-# Pkg.activate(".")
+Pkg.activate(".")
 
 using DiffEqFlux
 using LinearAlgebra, BSON
@@ -20,9 +20,9 @@ unn  = FastChain(FastDense(6, 8, elu),
                 FastDense(8, 5, elu),
                 FastDense(5, 1))
 
-inputLayer(x) = [cos(x[3]), sin(x[3]), cos(x[4]), sin(x[4]), x[7], x[8]]
+inputLayer(x) = [cos(x[1]), sin(x[1]), cos(x[2]), sin(x[2]), x[3], x[4]]
 
-ps = BSON.load("nnController_viaLCP_6-8-8-5-5-1elu.bson")[:param]
+ps = BSON.load("saved_weights/nnController_viaLCP_6-8-8-5-5-1elu.bson")[:param]
 
 function initialState(θ0, θ0dot, ϕ0, ϕ0dot)
     @assert pi-α <= θ0 <= pi+α "Give an initial spoke angle for the spoke in contact. This will help set the rimless wheel in contact with the surface"
@@ -47,7 +47,6 @@ function update_state!(msg::JointState, state::Vector)
 end
 
 function main()
-    @info "Julia started with weights located at $(weightdir)."
     init_node("nn_controller")
     state = zeros(Float64,4)
     pub = Publisher{JointState}("/torso_command", queue_size=1)
@@ -58,13 +57,14 @@ function main()
     torque = unn(inputLayer(x0), ps)[1]
 
     @info "Model loaded. Spinning ROS..."
-    loop_rate = Rate(800.0)
+    loop_rate = Rate(1000.0)
     torque_msg = JointState();
     while !is_shutdown()
         torque_msg.header = std_msgs.msg.Header()
         torque_msg.header.stamp = RobotOS.now()
         torque = unn(inputLayer(state), ps)[1]
-        torque_msg.effort[1] = torque;
+        torque_msg.effort = zeros(1)
+        torque_msg.effort[1] = torque
         publish(pub, torque_msg)
         rossleep(loop_rate)
     end
@@ -73,12 +73,12 @@ end
 
 function safe_shutdown_hack()
     @info "Publishing zero torque."
-    run(`rostopic pub -1 /torso/command std_msgs/Float64 "data: 0. "`, wait=false);
+    run(`rostopic pub -1 /torso_command sensor_msgs/JointState "effort: [0.] "`, wait=false);
 end
 
 Base.atexit(safe_shutdown_hack)
 
-# if !isinteractive()
-#     @info "Julia packages loaded. Starting main()"
-#     main()
-# end
+if !isinteractive()
+    @info "Julia packages loaded. Starting main()"
+    main()
+end
