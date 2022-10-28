@@ -132,12 +132,14 @@ void loop() {
 }
 
 void receiveJointState(const sensor_msgs::JointState &msg) {
+
     // TODO: actually write this method
     // received joint state should be something like:
     // { torque0, velocity0, torque1, velocity1 }
     // where the 1st two values are for motor 0 and the 2nd two are for motor 1.
     // One of these values per motor should be zero, and will be ignored
-
+    // The topic name for the torque command is "/torso_command"
+    
     // IF ALL VALUES RECEIVED ARE ZERO, STOP MOTORS
     // If one motor receives all zeros and the other doesn't, stop the motor with zeros
     return;

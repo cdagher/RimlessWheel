@@ -7,13 +7,14 @@ class TeensySubscriberCallBack{
 
         void getSensorStates(const sensor_msgs::JointState &msg) {
 
-            auto positions = msg.position;
-            torsoState[1] = msg.position[1];
-            torsoState[2] = msg.velocity[1];
+            torsoState[0] = msg.position[0];
+            torsoState[1] = msg.velocity[0];
+            spokeState[0] = msg.position[1];
             spokeState[1] = msg.position[2];
-            spokeState[2] = msg.position[3];
+            spokeState[2] = msg.velocity[1];
             spokeState[3] = msg.velocity[2];
-            spokeState[4] = msg.velocity[3];
+
+            ROS_INFO("Torso angle = %f", torsoState[0]);    
 
         }   
 
