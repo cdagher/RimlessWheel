@@ -15,6 +15,7 @@ const l1  = 0.26f0                  #wheel
 const l2  = 0.05f0                  #torso
 const k   = 10
 const α   = Float32(360.0/k/2.0 * pi/180.0)
+const DEG_TO_RAD = pi/180.0
 
 unn  = FastChain(FastDense(6, 8, elu), 
                 FastDense(8, 5, elu),
@@ -40,10 +41,10 @@ function initialState(θ0, θ0dot, ϕ0, ϕ0dot)
 end
 
 function update_state!(msg::JointState, state::Vector)
-    state[1] = msg.position[1]
-    state[2] = msg.position[2]
-    state[3] = msg.velocity[1]
-    state[4] = msg.velocity[2]
+    state[1] = msg.position[1]*DEG_TO_RAD
+    state[2] = msg.position[2]*DEG_TO_RAD
+    state[3] = msg.velocity[1]*DEG_TO_RAD
+    state[4] = msg.velocity[2]*DEG_TO_RAD
 end
 
 function main()

@@ -58,10 +58,25 @@ Adafruit_Mahony filter;  // fastest/smalleset
 #define PRINT_EVERY_N_UPDATES 10
 #define AHRS_DEBUG_OUTPUT
 
+const float m1 = 2.32;    
+const float m2 = 4.194; 
+const float I1 = 0.0784160;
+const float I2 = 0.0380256;
+const float mt = m1 + m2;
+const float l1 = 0.26;
+const float l2 = 0.05;
+const float g  = 9.81;
+const float gamma = 0.0; 
+const float k = 10;
+const float alpha = 360.0/k/2.0 * M_PI/180.0;
+
 const float samplingTime = 1.0/FILTER_UPDATE_RATE_HZ;
-float oldTorsoAngle = -999;
-float oldSpoke1Angle = -999;
-float oldSpoke2Angle = -999;
+float oldTorsoAngle = 0.0;
+float oldSpoke1Angle = M_PI - alpha;
+float oldSpoke2Angle = M_PI - alpha;
+float oldTorsoSpeed = 0.0;
+float oldSpokeSpeed = 0.0;
+float oldAppliedTorque = 0.0;
 uint32_t timestamp;
 
 void setup() {
@@ -128,7 +143,6 @@ void loop() {
 
   timestamp = millis();
   publishSensorStates();
-  // subscribeCommandMotorStates();
 
   nh.spinOnce();
 }
@@ -137,11 +151,14 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
 
     float torque = msg.effort[0];
     float velocity = msg.velocity[0];
+    oldAppliedTorque = torque;  // TODO: set oldAppliedTorque to torque applied by the motor 
+    //NOTE: not correct in velocity control
 
     assert( torque == 0.0 || velocity == 0.0);
     ODrive.SetVelocity(0, velocity);
     ODrive.SetVelocity(1, velocity);
 
+    // SetCurrent()
     // TODO: actually write this method
     // received joint state should be something like:
     // { torque0, velocity0, torque1, velocity1 }
@@ -154,11 +171,86 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
     return;
 }
 
+float* cross(float x[3], float y[3]){
+
+  static float crossProd[3];
+  crossProd[0] = x[1]*y[2] - x[2]*y[1];
+  crossProd[1] = x[2]*y[0] - x[0]*y[2];
+  crossProd[2] = x[0]*y[1] - x[1]*y[0];
+
+  return crossProd;
+
+}
+
+float alphaDynamics(float u, float theta, float phi, float thetadot, float phidot){
+
+  float BCG[2] = {-u + m2*l1*l2*sin(theta-phi)*pow(phidot, 2) + g*mt*l1*sin(theta-gamma), 
+                  u - m2*l1*l2*sin(theta-phi)*pow(thetadot,2) - g*m2*l2*sin(phi-gamma)};
+  float detM = (-I1*I2 - I1*pow(l2,2)*m2 - I2*pow(l1,2)*mt + pow(cos(theta-phi)*l1*l2*m2, 2) - pow(l1*l2, 2)*m2*mt);
+  
+  float alpha_x = 1.0/detM*( (-cos(theta-phi)*l1*l2*m2)*BCG[0] + (-I1 - pow(l1, 2)*mt)*BCG[1]);
+  
+  return alpha_x;
+}
+
+float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro, float alpha_x){
+  
+  static float acc_COM[3]; 
+
+  float imuToCOM[3] = {0.0, 0.0, 0.0};
+  float omega[3]    = {gyro.gyro.x, gyro.gyro.y, gyro.gyro.z};
+  float ap[3]       = {accel.acceleration.x, accel.acceleration.y, accel.acceleration.z};
+  float alpha[3]    = {alpha_x, 0.0, 0.0}; //assumes the robot has no tolerance/play in the y and z direction
+
+  auto omegaCrossR  = cross(omega, imuToCOM);
+  auto alphaCrossR  = cross(alpha, imuToCOM);
+  auto omegaCrossOmegaCrossR = cross(omega, omegaCrossR); 
+
+  for (int i = 0; i < 3; ++i){
+    acc_COM[i] = ap[i] - alphaCrossR[i] - omegaCrossOmegaCrossR[i];
+  }
+
+  return acc_COM;
+}
+
+bool impactDetected(){
+
+}
+
+float* impactMap(float phi, float thetadot, float phidot){
+
+  float det = I1*I2 + I1*m2*pow(l2,2) + I2*mt*pow(l1,2) + m2*pow(l1*l2,2)*(m1 + m2*pow(sin(alpha - phi),2));
+
+  float ξ1 = 1.0/det * ((I1*I2 + I1*m2*pow(l2,2)) + 
+          (I2*mt*pow(l1,2) + m2*pow(l1*l2,2)*(m1 + 0.5* m2))*cos(2*alpha) -
+          0.5*pow(m2*l1*l2,2)*cos(2.0*phi));
+
+  float ξ2 = 1.0/det *(m2*l1*l2*(I1*(cos(alpha - phi) - cos(alpha + phi)) + 
+          mt*pow(l1,2)*(cos(2.0*alpha)*cos(alpha - phi) - cos(alpha + phi))) );
+
+  static float vel[2] = {ξ1*thetadot, ξ2*thetadot+phidot};
+  return vel;
+}
+
+bool encoderSymmetryCheck(){
+
+}
 void publishSensorStates() {
 
   float encPos0 = 0.0;
   float encPos1 = 0.0;
   float gx, gy, gz;
+
+  //Read encoder from ODrive
+  encPos0 = ODrive.GetPosition(0);
+  encPos1 = ODrive.GetPosition(1);
+
+  //TODO: test GetVelocity
+  float encVel0 = ODrive.GetVelocity(0);
+  float encVel1 = ODrive.GetVelocity(1);
+
+  // float encVel0 = (encPos0 - oldSpoke1Angle)/samplingTime;
+  // float encVel1 = (encPos1 - oldSpoke2Angle)/samplingTime;
 
   sensors_event_t accel, gyro, mag;
   accelerometer->getEvent(&accel);
@@ -174,9 +266,29 @@ void publishSensorStates() {
   gy = gyro.gyro.y * SENSORS_RADS_TO_DPS;
   gz = gyro.gyro.z * SENSORS_RADS_TO_DPS;
 
+  //convert the linear acceleration of the IMU to the acceleration of the center of mass
+  // Compute the angular acceleration from the dynamics inorder to shift the linear acceleration at the COM
+  //find shifted linear acceleration
+  float theta, phi, thetadot, phidot;
+  if (!impactDetected()){
+    theta = encPos0;
+    phi = mag.magnetic.x;
+    thetadot = gx;
+    phidot = encVel0;
+  }
+  else{
+    theta = oldSpoke1Angle;
+    phi = oldTorsoAngle;
+    auto vel = impactMap(phi, oldSpokeSpeed, oldTorsoSpeed);
+    thetadot = vel[0];
+    phidot = vel[1];
+  }
+
+  float alpha_x = alphaDynamics(oldAppliedTorque, theta, phi, thetadot, phidot);
+  auto acc_COM = comAcceleration(accel, gyro, alpha_x);
   // Update the SensorFusion filter
   filter.update(gx, gy, gz, 
-                accel.acceleration.x, accel.acceleration.y, accel.acceleration.z, 
+                acc_COM[0], acc_COM[1], acc_COM[2], 
                 mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
 
   float torsoRoll    = filter.getRoll();
@@ -184,22 +296,13 @@ void publishSensorStates() {
   float torsoPitch   = filter.getPitch();
 
   //Update torso angular velocity
-  float torsoOmega = gx * 1.0 / SENSORS_RADS_TO_DPS;
+  float torsoOmega = gx;
   // float torsoOmega =  (torsoRoll - oldTorsoAngle)/samplingTime;
-  // oldTorsoAngle = torsoRoll;
-
-  //Read encoder from ODrive
-  // encPos0 = ODrive.GetPosition(0);
-  // encPos1 = ODrive.GetPosition(1);
-
-  //TODO: test GetVelocity
-  float encVel0 = ODrive.GetVelocity(0);
-  float encVel1 = ODrive.GetVelocity(1);
-
-  float spoke1Omega = (encPos0 - oldSpoke1Angle)/samplingTime;
-  oldSpoke1Angle    = encPos0;
-  float spoke2Omega = (encPos1 - oldSpoke2Angle)/samplingTime;
-  oldSpoke2Angle    = encPos1; 
+  oldTorsoAngle = torsoRoll;
+  oldTorsoSpeed = torsoOmega;
+  oldSpoke1Angle = encPos0;
+  oldSpoke2Angle = encPos1; 
+  oldSpokeSpeed = encVel0;
 
 #if defined(AHRS_DEBUG_OUTPUT)
   Serial.print("Orientation: ");
@@ -218,7 +321,7 @@ void publishSensorStates() {
       };
   float sensorVelocity[3] = 
       {
-      torsoOmega, spoke1Omega, spoke2Omega
+      torsoOmega, encVel0, encVel1
     };
 
   sensorStates.position = sensorPosition;
