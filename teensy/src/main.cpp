@@ -57,6 +57,7 @@ Adafruit_Mahony filter;  // fastest/smalleset
 #define FILTER_UPDATE_RATE_HZ 100
 #define PRINT_EVERY_N_UPDATES 10
 #define AHRS_DEBUG_OUTPUT
+#define TORQUE_CONTROL
 
 const float m1 = 2.32;    
 const float m2 = 4.194; 
@@ -66,9 +67,10 @@ const float mt = m1 + m2;
 const float l1 = 0.26;
 const float l2 = 0.05;
 const float g  = 9.81;
-const float gamma = 0.0; 
+const float incline = 0.0; 
 const float k = 10;
 const float alpha = 360.0/k/2.0 * M_PI/180.0;
+const float Kv = 0.13;
 
 const float samplingTime = 1.0/FILTER_UPDATE_RATE_HZ;
 float oldTorsoAngle = 0.0;
@@ -78,6 +80,7 @@ float oldTorsoSpeed = 0.0;
 float oldSpokeSpeed = 0.0;
 float oldAppliedTorque = 0.0;
 uint32_t timestamp;
+bool impactOccurredBefore = false;
 
 void setup() {
 
@@ -149,16 +152,19 @@ void loop() {
 
 void receiveJointState(const sensor_msgs::JointState &msg) {
 
-    float torque = msg.effort[0];
-    float velocity = msg.velocity[0];
-    oldAppliedTorque = torque;  // TODO: set oldAppliedTorque to torque applied by the motor 
-    //NOTE: not correct in velocity control
-
-    assert( torque == 0.0 || velocity == 0.0);
-    ODrive.SetVelocity(0, velocity);
-    ODrive.SetVelocity(1, velocity);
-
-    // SetCurrent()
+#if defined(TORQUE_CONTROL)
+  // float torque = msg.effort[0];
+  //  ODrive.SetCurrent(0, torque/Kv);
+  //  ODrive.SetCurrent(1, torque/Kv);
+ 
+  //  oldAppliedTorque = torque;  // TODO: set oldAppliedTorque to torque applied by the motor 
+   //NOTE: not correct in velocity control
+#else
+  // float velocity = msg.velocity[0];
+  // ODrive.SetVelocity(0, velocity);
+  // ODrive.SetVelocity(1, velocity);
+#endif
+    
     // TODO: actually write this method
     // received joint state should be something like:
     // { torque0, velocity0, torque1, velocity1 }
@@ -184,13 +190,13 @@ float* cross(float x[3], float y[3]){
 
 float alphaDynamics(float u, float theta, float phi, float thetadot, float phidot){
 
-  float BCG[2] = {-u + m2*l1*l2*sin(theta-phi)*pow(phidot, 2) + g*mt*l1*sin(theta-gamma), 
-                  u - m2*l1*l2*sin(theta-phi)*pow(thetadot,2) - g*m2*l2*sin(phi-gamma)};
-  float detM = (-I1*I2 - I1*pow(l2,2)*m2 - I2*pow(l1,2)*mt + pow(cos(theta-phi)*l1*l2*m2, 2) - pow(l1*l2, 2)*m2*mt);
+  float BCG[2] = {-u + m2*l1*l2*sinf(theta-phi)*powf(phidot, 2.0f) + g*mt*l1*sinf(theta-incline), 
+                  u - m2*l1*l2*sinf(theta-phi)*powf(thetadot,2.0f) - g*m2*l2*sinf(phi-incline)};
+  float detM = (-I1*I2 - I1*powf(l2,2.0f)*m2 - I2*powf(l1, 2.0f)*mt + powf(cosf(theta-phi)*l1*l2*m2, 2.0f) - powf(l1*l2, 2.0f)*m2*mt);
   
-  float alpha_x = 1.0/detM*( (-cos(theta-phi)*l1*l2*m2)*BCG[0] + (-I1 - pow(l1, 2)*mt)*BCG[1]);
+  float phidotdot = 1.0f/detM*( (-cosf(theta-phi)*l1*l2*m2)*BCG[0] + (-I1 - powf(l1, 2.0f)*mt)*BCG[1]);
   
-  return alpha_x;
+  return phidotdot;
 }
 
 float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro, float alpha_x){
@@ -214,40 +220,45 @@ float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro
 }
 
 bool impactDetected(){
-
+  return false;
 }
 
 float* impactMap(float phi, float thetadot, float phidot){
 
-  float det = I1*I2 + I1*m2*pow(l2,2) + I2*mt*pow(l1,2) + m2*pow(l1*l2,2)*(m1 + m2*pow(sin(alpha - phi),2));
+  float det = I1*I2 + I1*m2*powf(l2,2.0f) + I2*mt*powf(l1,2.0f) + m2*powf(l1*l2,2.0f)*(m1 + m2*powf(sinf(alpha - phi),2.0f));
 
-  float ξ1 = 1.0/det * ((I1*I2 + I1*m2*pow(l2,2)) + 
-          (I2*mt*pow(l1,2) + m2*pow(l1*l2,2)*(m1 + 0.5* m2))*cos(2*alpha) -
-          0.5*pow(m2*l1*l2,2)*cos(2.0*phi));
+  float a1 = 1.0f/det * ((I1*I2 + I1*m2*powf(l2,2.0f)) + 
+          (I2*mt*powf(l1,2.0f) + m2*powf(l1*l2,2.0f)*(m1 + 0.5f* m2))*cosf(2.0f*alpha) -
+          0.5*powf(m2*l1*l2,2.0f)*cosf(2.0f*phi));
 
-  float ξ2 = 1.0/det *(m2*l1*l2*(I1*(cos(alpha - phi) - cos(alpha + phi)) + 
-          mt*pow(l1,2)*(cos(2.0*alpha)*cos(alpha - phi) - cos(alpha + phi))) );
+  float a2 = 1.0f/det *(m2*l1*l2*(I1*(cosf(alpha - phi) - cosf(alpha + phi)) + 
+          mt*powf(l1,2.0f)*(cosf(2.0f*alpha)*cosf(alpha - phi) - cosf(alpha + phi))) );
 
-  static float vel[2] = {ξ1*thetadot, ξ2*thetadot+phidot};
+  static float vel[2] = {a1*thetadot, a2*thetadot+phidot};
   return vel;
 }
 
-bool encoderSymmetryCheck(){
-
+bool encoderSymmetryCheck(float encPos0, float encPos1){
+  return abs(encPos0 - encPos1) < 0.001;
 }
+
 void publishSensorStates() {
+
+  //All angles are given in radians.
 
   float encPos0 = 0.0;
   float encPos1 = 0.0;
+  float encVel0 = 0.0;
+  float encVel1 = 0.0;
   float gx, gy, gz;
 
   //Read encoder from ODrive
-  encPos0 = ODrive.GetPosition(0);
-  encPos1 = ODrive.GetPosition(1);
+  // encPos0 = ODrive.GetPosition(0);
+  // encPos1 = ODrive.GetPosition(1);
 
   //TODO: test GetVelocity
-  float encVel0 = ODrive.GetVelocity(0);
-  float encVel1 = ODrive.GetVelocity(1);
+  // encVel0 = ODrive.GetVelocity(0);
+  // encVel1 = ODrive.GetVelocity(1);
 
   // float encVel0 = (encPos0 - oldSpoke1Angle)/samplingTime;
   // float encVel1 = (encPos1 - oldSpoke2Angle)/samplingTime;
@@ -260,43 +271,55 @@ void publishSensorStates() {
   cal.calibrate(mag);
   cal.calibrate(accel);
   cal.calibrate(gyro);
-  // Gyroscope needs to be converted from Rad/s to Degree/s
-  // the rest are not unit-important
-  gx = gyro.gyro.x * SENSORS_RADS_TO_DPS;
-  gy = gyro.gyro.y * SENSORS_RADS_TO_DPS;
-  gz = gyro.gyro.z * SENSORS_RADS_TO_DPS;
 
   //convert the linear acceleration of the IMU to the acceleration of the center of mass
   // Compute the angular acceleration from the dynamics inorder to shift the linear acceleration at the COM
   //find shifted linear acceleration
   float theta, phi, thetadot, phidot;
   if (!impactDetected()){
-    theta = encPos0;
-    phi = mag.magnetic.x;
-    thetadot = gx;
-    phidot = encVel0;
+    theta     = encPos0;
+    phi       = mag.magnetic.x;
+    thetadot  = gyro.gyro.x;
+    phidot    = encVel0;
+    impactOccurredBefore = false;
   }
-  else{
-    theta = oldSpoke1Angle;
-    phi = oldTorsoAngle;
-    auto vel = impactMap(phi, oldSpokeSpeed, oldTorsoSpeed);
-    thetadot = vel[0];
-    phidot = vel[1];
+  else {
+    if (impactOccurredBefore){
+        theta     = oldSpoke1Angle;
+        phi       = oldTorsoAngle;
+        thetadot  = oldSpokeSpeed;
+        phidot    = oldTorsoSpeed;
+      }
+    else{
+      theta       = oldSpoke1Angle;
+      phi         = oldTorsoAngle;
+      auto vel    = impactMap(phi, oldSpokeSpeed, oldTorsoSpeed);
+      thetadot    = vel[0];
+      phidot      = vel[1];
+      impactOccurredBefore = true;
+      }
   }
-
+  
   float alpha_x = alphaDynamics(oldAppliedTorque, theta, phi, thetadot, phidot);
   auto acc_COM = comAcceleration(accel, gyro, alpha_x);
+
+  // Gyroscope needs to be converted from Rad/s to Degree/s
+  // the rest are not unit-important
+  gx = gyro.gyro.x * SENSORS_RADS_TO_DPS;
+  gy = gyro.gyro.y * SENSORS_RADS_TO_DPS;
+  gz = gyro.gyro.z * SENSORS_RADS_TO_DPS;
+
   // Update the SensorFusion filter
   filter.update(gx, gy, gz, 
                 acc_COM[0], acc_COM[1], acc_COM[2], 
                 mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
 
-  float torsoRoll    = filter.getRoll();
-  float torsoHeading = filter.getYaw();
-  float torsoPitch   = filter.getPitch();
+  float torsoRoll    = filter.getRoll() * 1.0f/SENSORS_RADS_TO_DPS;
+  float torsoHeading = filter.getYaw() * 1.0f/SENSORS_RADS_TO_DPS;
+  float torsoPitch   = filter.getPitch() * 1.0f/SENSORS_RADS_TO_DPS;
 
   //Update torso angular velocity
-  float torsoOmega = gx;
+  float torsoOmega = gyro.gyro.x;
   // float torsoOmega =  (torsoRoll - oldTorsoAngle)/samplingTime;
   oldTorsoAngle = torsoRoll;
   oldTorsoSpeed = torsoOmega;
@@ -306,11 +329,11 @@ void publishSensorStates() {
 
 #if defined(AHRS_DEBUG_OUTPUT)
   Serial.print("Orientation: ");
-  Serial.print(torsoHeading);
+  Serial.print(torsoHeading*SENSORS_RADS_TO_DPS);
   Serial.print(", ");
-  Serial.print(torsoPitch);
+  Serial.print(torsoPitch*SENSORS_RADS_TO_DPS);
   Serial.print(", ");
-  Serial.println(torsoRoll);
+  Serial.println(torsoRoll*SENSORS_RADS_TO_DPS);
 #endif
 
   sensorStates.position_length = 3;
