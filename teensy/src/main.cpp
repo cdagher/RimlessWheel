@@ -59,26 +59,26 @@ Adafruit_Mahony filter;  // fastest/smalleset
 #define AHRS_DEBUG_OUTPUT
 #define TORQUE_CONTROL
 
-const float m1 = 2.32;    
-const float m2 = 4.194; 
-const float I1 = 0.0784160;
-const float I2 = 0.0380256;
+const float m1 = 2.32f;    
+const float m2 = 4.194f; 
+const float I1 = 0.0784160f;
+const float I2 = 0.0380256f;
 const float mt = m1 + m2;
-const float l1 = 0.26;
-const float l2 = 0.05;
-const float g  = 9.81;
-const float incline = 0.0; 
-const float k = 10;
-const float alpha = 360.0/k/2.0 * M_PI/180.0;
-const float Kv = 0.13;
+const float l1 = 0.26f;
+const float l2 = 0.05f;
+const float g  = 9.81f;
+const float incline = 0.0f; 
+const float k = 10.0f;
+const float alpha = 360.0f/k/2.0f * M_PI/180.0f;
+const float Kv = 0.13f;
 
-const float samplingTime = 1.0/FILTER_UPDATE_RATE_HZ;
-float oldTorsoAngle = 0.0;
+const float samplingTime = 1.0f/FILTER_UPDATE_RATE_HZ;
+float oldTorsoAngle = 0.0f;
 float oldSpoke1Angle = M_PI - alpha;
 float oldSpoke2Angle = M_PI - alpha;
-float oldTorsoSpeed = 0.0;
-float oldSpokeSpeed = 0.0;
-float oldAppliedTorque = 0.0;
+float oldTorsoSpeed = 0.0f;
+float oldSpokeSpeed = 0.0f;
+float oldAppliedTorque = 0.0f;
 uint32_t timestamp;
 bool impactOccurredBefore = false;
 
@@ -203,10 +203,10 @@ float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro
   
   static float acc_COM[3]; 
 
-  float imuToCOM[3] = {0.0, 0.0, 0.0};
+  float imuToCOM[3] = {0.0f, 0.0f, 0.0f};
   float omega[3]    = {gyro.gyro.x, gyro.gyro.y, gyro.gyro.z};
   float ap[3]       = {accel.acceleration.x, accel.acceleration.y, accel.acceleration.z};
-  float alpha[3]    = {alpha_x, 0.0, 0.0}; //assumes the robot has no tolerance/play in the y and z direction
+  float alpha[3]    = {alpha_x, 0.0f, 0.0f}; //assumes the robot has no tolerance/play in the y and z direction
 
   auto omegaCrossR  = cross(omega, imuToCOM);
   auto alphaCrossR  = cross(alpha, imuToCOM);
@@ -225,14 +225,14 @@ bool impactDetected(){
 
 float* impactMap(float phi, float thetadot, float phidot){
 
-  float det = I1*I2 + I1*m2*powf(l2,2.0f) + I2*mt*powf(l1,2.0f) + m2*powf(l1*l2,2.0f)*(m1 + m2*powf(sinf(alpha - phi),2.0f));
+  float det = I1*I2 + I1*m2*powf(l2, 2.0f) + I2*mt*powf(l1, 2.0f) + m2*powf(l1*l2, 2.0f)*(m1 + m2*powf(sinf(alpha - phi),2.0f));
 
-  float a1 = 1.0f/det * ((I1*I2 + I1*m2*powf(l2,2.0f)) + 
-          (I2*mt*powf(l1,2.0f) + m2*powf(l1*l2,2.0f)*(m1 + 0.5f* m2))*cosf(2.0f*alpha) -
-          0.5*powf(m2*l1*l2,2.0f)*cosf(2.0f*phi));
+  float a1 = 1.0f/det * ((I1*I2 + I1*m2*powf(l2, 2.0f)) + 
+          (I2*mt*powf(l1, 2.0f) + m2*powf(l1*l2, 2.0f)*(m1 + 0.5f* m2))*cosf(2.0f*alpha) -
+          0.5*powf(m2*l1*l2, 2.0f)*cosf(2.0f*phi));
 
   float a2 = 1.0f/det *(m2*l1*l2*(I1*(cosf(alpha - phi) - cosf(alpha + phi)) + 
-          mt*powf(l1,2.0f)*(cosf(2.0f*alpha)*cosf(alpha - phi) - cosf(alpha + phi))) );
+          mt*powf(l1, 2.0f)*(cosf(2.0f*alpha)*cosf(alpha - phi) - cosf(alpha + phi))) );
 
   static float vel[2] = {a1*thetadot, a2*thetadot+phidot};
   return vel;
@@ -255,6 +255,8 @@ void publishSensorStates() {
   //Read encoder from ODrive
   // encPos0 = ODrive.GetPosition(0);
   // encPos1 = ODrive.GetPosition(1);
+
+  assert(encoderSymmetryCheck(encPos0, encPos1));
 
   //TODO: test GetVelocity
   // encVel0 = ODrive.GetVelocity(0);
@@ -291,12 +293,12 @@ void publishSensorStates() {
         phidot    = oldTorsoSpeed;
       }
     else{
-      theta       = oldSpoke1Angle;
-      phi         = oldTorsoAngle;
-      auto vel    = impactMap(phi, oldSpokeSpeed, oldTorsoSpeed);
-      thetadot    = vel[0];
-      phidot      = vel[1];
-      impactOccurredBefore = true;
+        theta       = oldSpoke1Angle;
+        phi         = oldTorsoAngle;
+        auto vel    = impactMap(phi, oldSpokeSpeed, oldTorsoSpeed);
+        thetadot    = vel[0];
+        phidot      = vel[1];
+        impactOccurredBefore = true;
       }
   }
   
