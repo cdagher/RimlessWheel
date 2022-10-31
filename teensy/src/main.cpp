@@ -191,7 +191,7 @@ float* cross(float x[3], float y[3]){
 float alphaDynamics(float u, float theta, float phi, float thetadot, float phidot){
 
   float BCG[2] = {-u + m2*l1*l2*sinf(theta-phi)*powf(phidot, 2.0f) + g*mt*l1*sinf(theta-incline), 
-                  u - m2*l1*l2*sinf(theta-phi)*powf(thetadot,2.0f) - g*m2*l2*sinf(phi-incline)};
+                  u - m2*l1*l2*sinf(theta-phi)*powf(thetadot, 2.0f) - g*m2*l2*sinf(phi-incline)};
   float detM = (-I1*I2 - I1*powf(l2,2.0f)*m2 - I2*powf(l1, 2.0f)*mt + powf(cosf(theta-phi)*l1*l2*m2, 2.0f) - powf(l1*l2, 2.0f)*m2*mt);
   
   float phidotdot = 1.0f/detM*( (-cosf(theta-phi)*l1*l2*m2)*BCG[0] + (-I1 - powf(l1, 2.0f)*mt)*BCG[1]);
