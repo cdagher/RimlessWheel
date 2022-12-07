@@ -8,8 +8,7 @@
     <node name="joystick" pkg="joy" type="joy_node">
         <param name="joy_node/dev" value="/dev/input/js0"/>
     </node>
-
-    <node name="twist_to_torque" pkg="topic_tools" type="transform" 
-        args="--wait-for-start /joy /torso_command sensor_msgs/JointState 'm.velocity[0]: m.axes[4]' 'm.velocity[1]: m.axes[6]'" />
+    
+    <node name="joystick_relay" pkg="raspi_pkg" type="raspi_pkg_node"/>
 
 </launch>
