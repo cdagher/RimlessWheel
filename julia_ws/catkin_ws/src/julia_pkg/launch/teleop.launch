@@ -5,8 +5,8 @@
         <param name="baud" value="57600"/>
     </node>
 
-    <node name="joystick" pkg="joy" type="joy_node"
-     <param name="joy_node/dev" value="/dev/input/js0" />
+    <node name="joystick" pkg="joy" type="joy_node">
+        <param name="joy_node/dev" value="/dev/input/js0"/>
     </node>
 
     <node name="twist_to_torque" pkg="topic_tools" type="transform" 
