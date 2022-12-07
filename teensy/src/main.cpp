@@ -57,7 +57,7 @@ Adafruit_Mahony filter;  // fastest/smalleset
 #define FILTER_UPDATE_RATE_HZ 100
 #define PRINT_EVERY_N_UPDATES 10
 #define AHRS_DEBUG_OUTPUT
-#define TORQUE_CONTROL
+// #define TORQUE_CONTROL
 
 const float m1 = 2.32f;    
 const float m2 = 4.194f; 
@@ -160,9 +160,9 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
   //  oldAppliedTorque = torque;  // TODO: set oldAppliedTorque to torque applied by the motor 
    //NOTE: not correct in velocity control
 #else
-  // float velocity = msg.velocity[0];
-  // ODrive.SetVelocity(0, velocity);
-  // ODrive.SetVelocity(1, velocity);
+  float velocity = msg.velocity[0];
+  ODrive.SetVelocity(0, velocity);
+  ODrive.SetVelocity(1, velocity);
 #endif
     
     // TODO: actually write this method
