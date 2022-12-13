@@ -5,17 +5,23 @@
 #include <geometry_msgs/Twist.h>
 #include "teensySubscriber.cpp"
 #include <cstdio>
+#include <array>
 #include <boost/bind.hpp>
 #include <boost/shared_ptr.hpp>
 
 //RaspiInterface allows one to control the rimeless wheel with joystick or trained controller.
 //It acts as a bridge between control command generator and teensy
 
-void joystickCb(const boost::shared_ptr<sensor_msgs::Joy const> msg, ros::Publisher& pub){
+void joystickCb(const boost::shared_ptr<sensor_msgs::Joy const> msg, ros::Publisher& torsoPub, ros::Publisher& odrivePub){
     //populate the content of joystickCommand (AKA joystickCommand.effort) from what you 
     //receive through ros bridge
+    int numButtons = sizeof(msg->buttons)/sizeof(msg->butons[0])
+
     sensor_msgs::JointState joystickCommand;
+    sensor_msgs::JointState odriveCommand;
     joystickCommand.velocity.resize(2);
+    odriveCommand.buttons.resize(numButtons);
+    
     if (msg->buttons[7] == 1) {
         joystickCommand.velocity[0] = {msg->axes[3]};
         joystickCommand.velocity[1] = {msg->axes[3]};
@@ -23,7 +29,13 @@ void joystickCb(const boost::shared_ptr<sensor_msgs::Joy const> msg, ros::Publis
         joystickCommand.velocity[0] = {msg->axes[1]};
         joystickCommand.velocity[1] = {msg->axes[3]};
     }
-    pub.publish(joystickCommand);
+    
+    for (int i=0; i<msg->numButtons; i++) {
+        odriveCommand.buttons[i] = {msg->buttons[i]};
+    }
+
+    torsoPub.publish(joystickCommand);
+    odrivePub.publish(odriveCommand);
 }
 
 int main(int argc, char **argv){
@@ -31,8 +43,9 @@ int main(int argc, char **argv){
     ros::init(argc, argv, "raspi_pkg_node");
     printf("Starting node");
     ros::NodeHandle nh;
-    ros::Publisher pub = nh.advertise<sensor_msgs::JointState>("/torso_command", 1);
-    ros::Subscriber sub = nh.subscribe<sensor_msgs::Joy>("/joy", 10, boost::bind(&joystickCb, _1, boost::ref(pub)));
+    ros::Publisher torsoPub = nh.advertise<sensor_msgs::JointState>("/torso_command", 1);
+    ros::Publisher drivePub = nh.advertise<sensor_msgs::Joy>("/odrive_command", 1);
+    ros::Subscriber sub = nh.subscribe<sensor_msgs::Joy>("/joy", 10, boost::bind(&joystickCb, _1, boost::ref(torsoPub)));
 
     while (ros::ok()){
         ros::spinOnce();

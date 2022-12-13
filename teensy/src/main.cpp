@@ -2,9 +2,10 @@
 #include <ros.h>
 #include <std_msgs/String.h>
 #include <sensor_msgs/JointState.h>
+#include <sensor_msgs/Joy.h>
 #include <Wire.h>
 #include <HardwareSerial.h>
-#include <../lib/ODrive/Arduino/ODriveArduino/ODriveArduino.h>
+#include <ODriveArduino.h>
 #include <Adafruit_Sensor_Calibration.h>
 #include <Adafruit_AHRS.h>
 #include <cassert> 
@@ -20,6 +21,7 @@ template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(a
 
 // #define USE_TEENSY_HW_SERIAL // for using a hardware serial port w/ ROS
 #define MOTOR_SUBSCRIBER_NAME "/torso_command"
+#define ODRIVE_SUBSCRIBER_NAME "/odrive_command"
 #define ENCODER_PUBLISHER_NAME "/sensors"
 
 #define MOTOR_VELOCITY_LIMIT 10.0 // This is in rotations per second
@@ -31,6 +33,10 @@ ros::NodeHandle nh;
 void receiveJointState(const sensor_msgs::JointState &msg);
 sensor_msgs::JointState motorStates; // comands for the motors
 ros::Subscriber<sensor_msgs::JointState> motors(MOTOR_SUBSCRIBER_NAME, &receiveJointState);
+
+void receiveODriveCommand(const sensor_msgs::Joy &msg);
+sensor_msgs::Joy odriveCommand; // commands for clearing errors, rebooting, etc
+ros::Subscriber<sensor_msgs::Joy> odriveCmd(ODRIVE_SUBSCRIBER_NAME, &receiveODriveCommand);
 
 void publishSensorStates();
 sensor_msgs::JointState sensorStates; // feedback of the encoder positions
@@ -176,6 +182,29 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
     // IF ALL VALUES RECEIVED ARE ZERO, STOP MOTORS
     // If one motor receives all zeros and the other doesn't, stop the motor with zeros
     return;
+}
+
+void receiveODriveCommand(const sensor_msgs::Joy &msg) {
+  if (msg.buttons[1] == 1) {
+    ODrive.SetVelocity(0, 0);
+    ODrive.SetVelocity(1, 0);
+
+    ODrive.clearErrors();
+    delay(250);
+
+    calibrateMotor(0);
+    calibrateMotor(1);
+
+  } else if (msg.buttons[2] == 1) {
+    ODrive.SetVelocity(0, 0);
+    ODrive.SetVelocity(1, 0);
+
+    ODrive.reboot();
+    delay(2000);
+
+    calibrateMotor(0);
+    calibrateMotor(1);
+  }
 }
 
 float* cross(float x[3], float y[3]){

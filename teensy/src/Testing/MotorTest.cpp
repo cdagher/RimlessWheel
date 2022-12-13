@@ -2,7 +2,7 @@
 #include <Wire.h>
 #include <Adafruit_LSM6DS.h>
 #include <HardwareSerial.h>
-#include <../lib/ODrive/Arduino/ODriveArduino/ODriveArduino.h>
+#include <ODriveArduino.h>
 
 
 // print stream operator helper functions
