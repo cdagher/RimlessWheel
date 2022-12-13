@@ -16,8 +16,13 @@ void joystickCb(const boost::shared_ptr<sensor_msgs::Joy const> msg, ros::Publis
     //receive through ros bridge
     sensor_msgs::JointState joystickCommand;
     joystickCommand.velocity.resize(2);
-    joystickCommand.velocity[0] = {msg->axes[2]};
-    joystickCommand.velocity[1] = {msg->axes[3]};
+    if (msg->buttons[7] == 1) {
+        joystickCommand.velocity[0] = {msg->axes[3]};
+        joystickCommand.velocity[1] = {msg->axes[3]};
+    } else {
+        joystickCommand.velocity[0] = {msg->axes[1]};
+        joystickCommand.velocity[1] = {msg->axes[3]};
+    }
     pub.publish(joystickCommand);
 }
 
