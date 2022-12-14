@@ -2,6 +2,7 @@
 #include <ros.h>
 #include <std_msgs/String.h>
 #include <sensor_msgs/JointState.h>
+#include <sensor_msgs/Joy.h>
 #include <Wire.h>
 #include <HardwareSerial.h>
 #include <ODriveArduino.h>
@@ -20,6 +21,7 @@ template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(a
 
 // #define USE_TEENSY_HW_SERIAL // for using a hardware serial port w/ ROS
 #define MOTOR_SUBSCRIBER_NAME "/torso_command"
+#define ODRIVE_SUBSCRIBER_NAME "/odrive_command"
 #define ENCODER_PUBLISHER_NAME "/sensors"
 
 #define MOTOR_VELOCITY_LIMIT 10.0 // radians per second? Maybe rotations per second?
@@ -31,6 +33,10 @@ ros::NodeHandle nh;
 void receiveJointState(const sensor_msgs::JointState &msg);
 sensor_msgs::JointState motorStates; // comands for the motors
 ros::Subscriber<sensor_msgs::JointState> motors(MOTOR_SUBSCRIBER_NAME, &receiveJointState);
+
+void receiveODriveCommand(const sensor_msgs::Joy &msg);
+sensor_msgs::Joy odriveCommand; // commands for clearing errors, rebooting, etc
+ros::Subscriber<sensor_msgs::Joy> odriveCmd(ODRIVE_SUBSCRIBER_NAME, &receiveODriveCommand);
 
 void publishSensorStates();
 sensor_msgs::JointState sensorStates; // feedback of the encoder positions
@@ -86,6 +92,7 @@ void setup() {
 
   nh.initNode();
   nh.subscribe(motors);
+  nh.subscribe(odriveCmd);
   nh.advertise(sensors);
 
   // Serial output over USB
@@ -176,6 +183,29 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
     // IF ALL VALUES RECEIVED ARE ZERO, STOP MOTORS
     // If one motor receives all zeros and the other doesn't, stop the motor with zeros
     return;
+}
+
+void receiveODriveCommand(const sensor_msgs::Joy &msg) {
+  if (msg.buttons[0] == 1) {
+    ODrive.SetVelocity(0, 0);
+    ODrive.SetVelocity(1, 0);
+
+    odriveSerial << "sc" << "\n";
+    delay(250);
+
+    calibrateMotor(0);
+    calibrateMotor(1);
+
+  } else if (msg.buttons[3] == 1) {
+    ODrive.SetVelocity(0, 0);
+    ODrive.SetVelocity(1, 0);
+
+    odriveSerial << "sr" << "\n";
+    delay(2000);
+
+    calibrateMotor(0);
+    calibrateMotor(1);
+  }
 }
 
 float* cross(float x[3], float y[3]){
