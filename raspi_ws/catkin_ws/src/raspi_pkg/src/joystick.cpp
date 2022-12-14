@@ -12,13 +12,13 @@
 //RaspiInterface allows one to control the rimeless wheel with joystick or trained controller.
 //It acts as a bridge between control command generator and teensy
 
-void joystickCb(const boost::shared_ptr<sensor_msgs::Joy const> msg, ros::Publisher& torsoPub, ros::Publisher& odrivePub){
+void joystickCb(const boost::shared_ptr<sensor_msgs::Joy const> msg, ros::Publisher& torsoPub, ros::Publisher& odrivePub) {
     //populate the content of joystickCommand (AKA joystickCommand.effort) from what you 
     //receive through ros bridge
-    int numButtons = sizeof(msg->buttons)/sizeof(msg->butons[0])
+    int numButtons = sizeof(msg->buttons)/sizeof(msg->buttons[0]);
 
     sensor_msgs::JointState joystickCommand;
-    sensor_msgs::JointState odriveCommand;
+    sensor_msgs::Joy odriveCommand;
     joystickCommand.velocity.resize(2);
     odriveCommand.buttons.resize(numButtons);
     
@@ -30,12 +30,13 @@ void joystickCb(const boost::shared_ptr<sensor_msgs::Joy const> msg, ros::Publis
         joystickCommand.velocity[1] = {msg->axes[3]};
     }
     
-    for (int i=0; i<msg->numButtons; i++) {
+    for (int i=0; i<numButtons; i++) {
         odriveCommand.buttons[i] = {msg->buttons[i]};
     }
 
     torsoPub.publish(joystickCommand);
-    odrivePub.publish(odriveCommand);
+    odrivePub.publish(odriveCommand);ls
+
 }
 
 int main(int argc, char **argv){
@@ -44,8 +45,8 @@ int main(int argc, char **argv){
     printf("Starting node");
     ros::NodeHandle nh;
     ros::Publisher torsoPub = nh.advertise<sensor_msgs::JointState>("/torso_command", 1);
-    ros::Publisher drivePub = nh.advertise<sensor_msgs::Joy>("/odrive_command", 1);
-    ros::Subscriber sub = nh.subscribe<sensor_msgs::Joy>("/joy", 10, boost::bind(&joystickCb, _1, boost::ref(torsoPub)));
+    ros::Publisher odrivePub = nh.advertise<sensor_msgs::Joy>("/odrive_command", 1);
+    ros::Subscriber sub = nh.subscribe<sensor_msgs::Joy>("/joy", 10, boost::bind(&joystickCb, _1, boost::ref(torsoPub), boost::ref(odrivePub)));
 
     while (ros::ok()){
         ros::spinOnce();
