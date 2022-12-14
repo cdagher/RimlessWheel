@@ -113,7 +113,7 @@ void setup() {
   Wire.setClock(400000); // 400KHz
   
   // ODrive uses 115200 as the baudrate
-  // odriveSerial.begin(115200);
+  odriveSerial.begin(115200);
 
   // TODO: figure out why this returns zero. Maybe the ODrive needs a FW update?
   odriveSerial << "r vbus_voltage\n";
@@ -122,15 +122,15 @@ void setup() {
   Serial.println("Setting parameters...");
 
   // set the parameters for both motors
-  // for (int axis = 0; axis < 2; ++axis) {
-  //   odriveSerial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
-  //   odriveSerial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
-  //   // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
-  // }
+  for (int axis = 0; axis < 2; ++axis) {
+    odriveSerial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
+    odriveSerial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
+    // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
+  }
 
   // calibrate the motors
-  // calibrateMotor(0);
-  // calibrateMotor(1);
+  calibrateMotor(0);
+  calibrateMotor(1);
 
   //Keep track of time to sample the encoders and the IMU evenly
   timestamp = millis();
@@ -160,9 +160,10 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
   //  oldAppliedTorque = torque;  // TODO: set oldAppliedTorque to torque applied by the motor 
    //NOTE: not correct in velocity control
 #else
-  float velocity = msg.velocity[0];
-  ODrive.SetVelocity(0, velocity);
-  ODrive.SetVelocity(1, velocity);
+  float velocity0 = msg.velocity[0];
+  float velocity1 = msg.velocity[1];
+  ODrive.SetVelocity(0, -1*velocity0*MOTOR_VELOCITY_LIMIT);
+  ODrive.SetVelocity(1, velocity1*MOTOR_VELOCITY_LIMIT);
 #endif
     
     // TODO: actually write this method
