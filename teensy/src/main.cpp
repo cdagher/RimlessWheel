@@ -92,6 +92,7 @@ void setup() {
 
   nh.initNode();
   nh.subscribe(motors);
+  nh.subscribe(odriveCmd);
   nh.advertise(sensors);
 
   // Serial output over USB
@@ -185,7 +186,7 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
 }
 
 void receiveODriveCommand(const sensor_msgs::Joy &msg) {
-  if (msg.buttons[1] == 1) {
+  if (msg.buttons[0] == 1) {
     ODrive.SetVelocity(0, 0);
     ODrive.SetVelocity(1, 0);
 
@@ -195,7 +196,7 @@ void receiveODriveCommand(const sensor_msgs::Joy &msg) {
     calibrateMotor(0);
     calibrateMotor(1);
 
-  } else if (msg.buttons[2] == 1) {
+  } else if (msg.buttons[3] == 1) {
     ODrive.SetVelocity(0, 0);
     ODrive.SetVelocity(1, 0);
 
