@@ -10,10 +10,7 @@
 #include <Adafruit_Sensor_Calibration.h>
 #include <Adafruit_AHRS.h>
 #include <cassert> 
-
-Adafruit_Sensor *accelerometer, *gyroscope, *magnetometer;
-
-#include "LSM6DS_LIS3MDL.h"  // can adjust to LSM6DS33, LSM6DS3U, LSM6DSOX...
+#include <Adafruit_LSM6DSOX.h>
 
 // print stream operator helper functions
 template<class T> inline Print& operator <<(Print &obj,     T arg) { obj.print(arg);    return obj; }
@@ -21,6 +18,16 @@ template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(a
 
 // #define TO_STREAM(stream,variable) (stream) <<#variable": "<<(variable) // see https://cplusplus.com/forum/beginner/11252/
 
+#define STEP_DETECT_PIN 21
+Adafruit_LSM6DSOX lsm6ds;
+Adafruit_Sensor *accelerometer, *gyroscope, *magnetometer;
+
+#include "LSM6DS_LIS3MDL.h"  // can adjust to LSM6DS33, LSM6DS3U, LSM6DSOX...
+
+volatile bool stepDetected = false;
+void stepDetectISR(void) {
+  stepDetected = true;
+}
 
 // #define USE_TEENSY_HW_SERIAL // for using a hardware serial port w/ ROS
 #define MOTOR_SUBSCRIBER_NAME "/torso_command"
@@ -124,6 +131,8 @@ void setup() {
     Serial.println("Failed to find sensors");
     while (1) delay(10);
   }
+
+  attachInterrupt(STEP_DETECT_PIN, stepDetectISR, RISING);
   
   accelerometer->printSensorDetails();
   gyroscope->printSensorDetails();
@@ -322,7 +331,12 @@ float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro
   return acc_COM;
 }
 
-bool impactDetected(){
+bool impactDetected() {
+  if (stepDetected) {
+    stepDetected = false; // reset this flag
+    return true;
+  }
+
   return false;
 }
 
@@ -381,21 +395,20 @@ void publishSensorStates() {
   // Compute the angular acceleration from the dynamics inorder to shift the linear acceleration at the COM
   //find shifted linear acceleration
   float theta, phi, thetadot, phidot;
-  if (!impactDetected()){
+  if (!impactDetected()) {
     theta     = encPos0;
     phi       = mag.magnetic.x;
     thetadot  = gyro.gyro.x;
     phidot    = encVel0;
     impactOccurredBefore = false;
-  }
-  else {
-    if (impactOccurredBefore){
+  } else {
+    if (impactOccurredBefore) {
         theta     = oldSpoke1Angle;
         phi       = oldTorsoAngle;
         thetadot  = oldSpokeSpeed;
         phidot    = oldTorsoSpeed;
       }
-    else{
+    else {
         theta       = oldSpoke1Angle;
         phi         = oldTorsoAngle;
         auto vel    = impactMap(phi, oldSpokeSpeed, oldTorsoSpeed);
