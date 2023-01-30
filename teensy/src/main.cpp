@@ -265,7 +265,7 @@ int64_t readErrors() {
 }
 
 int64_t readODriveErrors() {
-    odriveSerial << "error" << "\n";
+    odriveSerial << "r error" << "\n";
     return ODrive.readlong();
 }
 
