@@ -380,32 +380,7 @@ void publishSensorStates() {
   //convert the linear acceleration of the IMU to the acceleration of the center of mass
   // Compute the angular acceleration from the dynamics inorder to shift the linear acceleration at the COM
   //find shifted linear acceleration
-  float theta, phi, thetadot, phidot;
-  if (!impactDetected()){
-    theta     = encPos0;
-    phi       = mag.magnetic.x;
-    thetadot  = gyro.gyro.x;
-    phidot    = encVel0;
-    impactOccurredBefore = false;
-  }
-  else {
-    if (impactOccurredBefore){
-        theta     = oldSpoke1Angle;
-        phi       = oldTorsoAngle;
-        thetadot  = oldSpokeSpeed;
-        phidot    = oldTorsoSpeed;
-      }
-    else{
-        theta       = oldSpoke1Angle;
-        phi         = oldTorsoAngle;
-        auto vel    = impactMap(phi, oldSpokeSpeed, oldTorsoSpeed);
-        thetadot    = vel[0];
-        phidot      = vel[1];
-        impactOccurredBefore = true;
-      }
-  }
   
-  float alpha_x = alphaDynamics(oldAppliedTorque, theta, phi, thetadot, phidot);
   auto acc_COM = comAcceleration(accel, gyro, alpha_x);
 
   // Gyroscope needs to be converted from Rad/s to Degree/s
