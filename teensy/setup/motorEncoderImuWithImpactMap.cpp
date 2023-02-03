@@ -78,7 +78,6 @@ Adafruit_Mahony filter;  // fastest/smalleset
 #define PRINT_EVERY_N_UPDATES 10
 #define AHRS_DEBUG_OUTPUT
 // #define TORQUE_CONTROL
-// #define ODRIVE_CONNECTED
 
 const float m1 = 2.32f;    
 const float m2 = 4.194f; 
@@ -94,10 +93,12 @@ const float alpha = 360.0f/k/2.0f * M_PI/180.0f;
 const float Kv = 0.13f;
 
 const float samplingTime = 1.0f/FILTER_UPDATE_RATE_HZ;
-float oldTorsoOmega = 0.0f;
+float oldTorsoAngle = 0.0f;
 float oldSpoke1Angle = M_PI - alpha;
 float oldSpoke2Angle = M_PI - alpha;
+float oldTorsoSpeed = 0.0f;
 float oldSpokeSpeed = 0.0f;
+float oldAppliedTorque = 0.0f;
 uint32_t timestamp;
 bool impactOccurredBefore = false;
 
@@ -119,8 +120,6 @@ void setup() {
     Serial.println("No calibration loaded/found");
   }
 
-  delay(10);
-
   if (!init_sensors()) {
     Serial.println("Failed to find sensors");
     while (1) delay(10);
@@ -135,27 +134,25 @@ void setup() {
 
   Wire.setClock(400000); // 400KHz
   
-  #if defined(ODRIVE_CONNECTED)
-    // ODrive uses 115200 as the baudrate
-    odriveSerial.begin(115200);
+  // ODrive uses 115200 as the baudrate
+  odriveSerial.begin(115200);
 
-    // TODO: figure out why this returns zero. Maybe the ODrive needs a FW update?
-    odriveSerial << "r vbus_voltage\n";
-    Serial << "Vbus voltage: " << ODrive.readFloat() << '\n';
+  // TODO: figure out why this returns zero. Maybe the ODrive needs a FW update?
+  odriveSerial << "r vbus_voltage\n";
+  Serial << "Vbus voltage: " << ODrive.readFloat() << '\n';
 
-    Serial.println("Setting parameters...");
+  Serial.println("Setting parameters...");
 
-    // set the parameters for both motors
-    for (int axis = 0; axis < 2; ++axis) {
-      odriveSerial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
-      odriveSerial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
-      // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
-    }
+  // set the parameters for both motors
+  for (int axis = 0; axis < 2; ++axis) {
+    odriveSerial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
+    odriveSerial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
+    // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
+  }
 
-    // calibrate the motors
-    calibrateMotor(0);
-    calibrateMotor(1);
-  #endif
+  // calibrate the motors
+  calibrateMotor(0);
+  calibrateMotor(1);
 
   //Keep track of time to sample the encoders and the IMU evenly
   timestamp = millis();
@@ -171,13 +168,11 @@ void loop() {
 
   timestamp = millis();
   publishSensorStates();
-  #if defined(ODRIVE_CONNECTED)
-    if (readErrors() != 0) {
-      // TODO: clear non-critical errors
-      odriveErrors.publish(&errorStates);
-    }
-  #endif
-  
+  if (readErrors() != 0) {
+    // TODO: clear non-critical errors
+    odriveErrors.publish(&errorStates);
+  }
+
   nh.spinOnce();
 }
 
@@ -188,13 +183,13 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
   //  ODrive.SetCurrent(0, torque/Kv);
   //  ODrive.SetCurrent(1, torque/Kv);
  
+  //  oldAppliedTorque = torque;  // TODO: set oldAppliedTorque to torque applied by the motor 
+   //NOTE: not correct in velocity control
 #else
- #if defined(ODRIVE_CONNECTED)
   float velocity0 = msg.velocity[0];
   float velocity1 = msg.velocity[1];
   ODrive.SetVelocity(0, -1*velocity0*MOTOR_VELOCITY_LIMIT);
   ODrive.SetVelocity(1, velocity1*MOTOR_VELOCITY_LIMIT);
-  #endif 
 #endif
     
     // TODO: actually write this method
@@ -296,6 +291,17 @@ float* cross(float x[3], float y[3]){
 
 }
 
+float alphaDynamics(float u, float theta, float phi, float thetadot, float phidot){
+
+  float BCG[2] = {-u + m2*l1*l2*sinf(theta-phi)*powf(phidot, 2.0f) + g*mt*l1*sinf(theta-incline), 
+                  u - m2*l1*l2*sinf(theta-phi)*powf(thetadot, 2.0f) - g*m2*l2*sinf(phi-incline)};
+  float detM = (-I1*I2 - I1*powf(l2,2.0f)*m2 - I2*powf(l1, 2.0f)*mt + powf(cosf(theta-phi)*l1*l2*m2, 2.0f) - powf(l1*l2, 2.0f)*m2*mt);
+  
+  float phidotdot = 1.0f/detM*( (-cosf(theta-phi)*l1*l2*m2)*BCG[0] + (-I1 - powf(l1, 2.0f)*mt)*BCG[1]);
+  
+  return phidotdot;
+}
+
 float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro, float alpha_x){
   
   static float acc_COM[3]; 
@@ -316,6 +322,25 @@ float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro
   return acc_COM;
 }
 
+bool impactDetected(){
+  return false;
+}
+
+float* impactMap(float phi, float thetadot, float phidot){
+
+  float det = I1*I2 + I1*m2*powf(l2, 2.0f) + I2*mt*powf(l1, 2.0f) + m2*powf(l1*l2, 2.0f)*(m1 + m2*powf(sinf(alpha - phi),2.0f));
+
+  float a1 = 1.0f/det * ((I1*I2 + I1*m2*powf(l2, 2.0f)) + 
+          (I2*mt*powf(l1, 2.0f) + m2*powf(l1*l2, 2.0f)*(m1 + 0.5f* m2))*cosf(2.0f*alpha) -
+          0.5*powf(m2*l1*l2, 2.0f)*cosf(2.0f*phi));
+
+  float a2 = 1.0f/det *(m2*l1*l2*(I1*(cosf(alpha - phi) - cosf(alpha + phi)) + 
+          mt*powf(l1, 2.0f)*(cosf(2.0f*alpha)*cosf(alpha - phi) - cosf(alpha + phi))) );
+
+  static float vel[2] = {a1*thetadot, a2*thetadot+phidot};
+  return vel;
+}
+
 bool encoderSymmetryCheck(float encPos0, float encPos1){
   return abs(encPos0 - encPos1) < 0.001;
 }
@@ -330,20 +355,18 @@ void publishSensorStates() {
   float encVel1 = 0.0;
   float gx, gy, gz;
 
-  #if defined(ODRIVE_CONNECTED)
-    //Read encoder from ODrive
-    // encPos0 = ODrive.GetPosition(0);
-    // encPos1 = ODrive.GetPosition(1);
+  //Read encoder from ODrive
+  // encPos0 = ODrive.GetPosition(0);
+  // encPos1 = ODrive.GetPosition(1);
 
-    assert(encoderSymmetryCheck(encPos0, encPos1));
+  assert(encoderSymmetryCheck(encPos0, encPos1));
 
-    //TODO: test GetVelocity
-    // encVel0 = ODrive.GetVelocity(0);
-    // encVel1 = ODrive.GetVelocity(1);
+  //TODO: test GetVelocity
+  // encVel0 = ODrive.GetVelocity(0);
+  // encVel1 = ODrive.GetVelocity(1);
 
-    // float encVel0 = (encPos0 - oldSpoke1Angle)/samplingTime;
-    // float encVel1 = (encPos1 - oldSpoke2Angle)/samplingTime;
-    #endif
+  // float encVel0 = (encPos0 - oldSpoke1Angle)/samplingTime;
+  // float encVel1 = (encPos1 - oldSpoke2Angle)/samplingTime;
 
   sensors_event_t accel, gyro, mag;
   accelerometer->getEvent(&accel);
@@ -353,14 +376,36 @@ void publishSensorStates() {
   cal.calibrate(mag);
   cal.calibrate(accel);
   cal.calibrate(gyro);
-  
-  //Update torso angular velocity
-  float torsoOmega = gyro.gyro.x;
 
+  //convert the linear acceleration of the IMU to the acceleration of the center of mass
   // Compute the angular acceleration from the dynamics inorder to shift the linear acceleration at the COM
   //find shifted linear acceleration
+  float theta, phi, thetadot, phidot;
+  if (!impactDetected()){
+    theta     = encPos0;
+    phi       = mag.magnetic.x;
+    thetadot  = gyro.gyro.x;
+    phidot    = encVel0;
+    impactOccurredBefore = false;
+  }
+  else {
+    if (impactOccurredBefore){
+        theta     = oldSpoke1Angle;
+        phi       = oldTorsoAngle;
+        thetadot  = oldSpokeSpeed;
+        phidot    = oldTorsoSpeed;
+      }
+    else{
+        theta       = oldSpoke1Angle;
+        phi         = oldTorsoAngle;
+        auto vel    = impactMap(phi, oldSpokeSpeed, oldTorsoSpeed);
+        thetadot    = vel[0];
+        phidot      = vel[1];
+        impactOccurredBefore = true;
+      }
+  }
   
-  float alpha_x = (torsoOmega - oldTorsoOmega)/samplingTime;
+  float alpha_x = alphaDynamics(oldAppliedTorque, theta, phi, thetadot, phidot);
   auto acc_COM = comAcceleration(accel, gyro, alpha_x);
 
   // Gyroscope needs to be converted from Rad/s to Degree/s
@@ -378,7 +423,11 @@ void publishSensorStates() {
   float torsoHeading = filter.getYaw() * 1.0f/SENSORS_RADS_TO_DPS;
   float torsoPitch   = filter.getPitch() * 1.0f/SENSORS_RADS_TO_DPS;
 
-  oldTorsoOmega = torsoOmega;
+  //Update torso angular velocity
+  float torsoOmega = gyro.gyro.x;
+  // float torsoOmega =  (torsoRoll - oldTorsoAngle)/samplingTime;
+  oldTorsoAngle = torsoRoll;
+  oldTorsoSpeed = torsoOmega;
   oldSpoke1Angle = encPos0;
   oldSpoke2Angle = encPos1; 
   oldSpokeSpeed = encVel0;
@@ -390,8 +439,6 @@ void publishSensorStates() {
   Serial.print(torsoPitch*SENSORS_RADS_TO_DPS);
   Serial.print(", ");
   Serial.println(torsoRoll*SENSORS_RADS_TO_DPS);
-  Serial.print("Angular velocities: ");
-  Serial.println(torsoOmega*SENSORS_RADS_TO_DPS);
 #endif
 
   sensorStates.position_length = 3;

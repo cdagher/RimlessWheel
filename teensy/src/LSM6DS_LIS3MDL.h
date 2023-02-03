@@ -6,7 +6,12 @@ Adafruit_LIS3MDL lis3mdl;
 Adafruit_LSM6DSOX lsm6ds;
 
 bool init_sensors(void) {
-  if (!lsm6ds.begin_I2C() || !lis3mdl.begin_I2C()) {
+  if (!lsm6ds.begin_I2C()){  
+    Serial.print("Accelerometer and gyro not connecting");
+    if (!lis3mdl.begin_I2C()) {
+      Serial.print("Magnetometer not connecting");
+      return false;
+    }
     return false;
   }
   accelerometer = lsm6ds.getAccelerometerSensor();
