@@ -1,7 +1,9 @@
 #include <Arduino.h>
 #include <ros.h>
 #include <std_msgs/String.h>
+#include <std_msgs/Int64MultiArray.h>
 #include <sensor_msgs/JointState.h>
+#include <sensor_msgs/Joy.h>
 #include <Wire.h>
 #include <HardwareSerial.h>
 #include <ODriveArduino.h>
@@ -17,10 +19,14 @@ Adafruit_Sensor *accelerometer, *gyroscope, *magnetometer;
 template<class T> inline Print& operator <<(Print &obj,     T arg) { obj.print(arg);    return obj; }
 template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(arg, 4); return obj; }
 
+// #define TO_STREAM(stream,variable) (stream) <<#variable": "<<(variable) // see https://cplusplus.com/forum/beginner/11252/
+
 
 // #define USE_TEENSY_HW_SERIAL // for using a hardware serial port w/ ROS
 #define MOTOR_SUBSCRIBER_NAME "/torso_command"
+#define ODRIVE_SUBSCRIBER_NAME "/odrive_command"
 #define ENCODER_PUBLISHER_NAME "/sensors"
+#define ODRIVE_ERROR_PUBLISHER_NAME "/odrive_errors"
 
 #define MOTOR_VELOCITY_LIMIT 10.0 // radians per second? Maybe rotations per second?
 #define MOTOR_CURRENT_LIMIT  20.0 // amps
@@ -32,9 +38,17 @@ void receiveJointState(const sensor_msgs::JointState &msg);
 sensor_msgs::JointState motorStates; // comands for the motors
 ros::Subscriber<sensor_msgs::JointState> motors(MOTOR_SUBSCRIBER_NAME, &receiveJointState);
 
+void receiveODriveCommand(const sensor_msgs::Joy &msg);
+sensor_msgs::Joy odriveCommand; // commands for clearing errors, rebooting, etc
+ros::Subscriber<sensor_msgs::Joy> odriveCmd(ODRIVE_SUBSCRIBER_NAME, &receiveODriveCommand);
+
 void publishSensorStates();
 sensor_msgs::JointState sensorStates; // feedback of the encoder positions
 ros::Publisher sensors(ENCODER_PUBLISHER_NAME, &sensorStates);
+
+void publishErrorState();
+std_msgs::Int64MultiArray errorStates; // error states for the ODrive
+ros::Publisher odriveErrors(ODRIVE_ERROR_PUBLISHER_NAME, &errorStates);
 
 // Teensy 3 and 4 (all versions) - Serial1
 // pin 0: RX - connect to ODrive TX (GPIO1)
@@ -45,6 +59,12 @@ HardwareSerial &odriveSerial = Serial1;
 // ODrive object
 ODriveArduino ODrive(odriveSerial);
 void calibrateMotor(bool motor);
+int64_t readErrors();
+int64_t readODriveErrors();
+int64_t readMotorErrors(int motor_number);
+int64_t readAxisErrors(int axis_number);
+int64_t readEncoderErrors(int encoder_number);
+int64_t readControllerErrors(int controller_number);
 
 Adafruit_Mahony filter;  // fastest/smalleset
 
@@ -86,7 +106,9 @@ void setup() {
 
   nh.initNode();
   nh.subscribe(motors);
+  nh.subscribe(odriveCmd);
   nh.advertise(sensors);
+  nh.advertise(odriveErrors);
 
   // Serial output over USB
   Serial.begin(115200);
@@ -146,6 +168,10 @@ void loop() {
 
   timestamp = millis();
   publishSensorStates();
+  if (readErrors() != 0) {
+    // TODO: clear non-critical errors
+    odriveErrors.publish(&errorStates);
+  }
 
   nh.spinOnce();
 }
@@ -176,6 +202,82 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
     // IF ALL VALUES RECEIVED ARE ZERO, STOP MOTORS
     // If one motor receives all zeros and the other doesn't, stop the motor with zeros
     return;
+}
+
+void receiveODriveCommand(const sensor_msgs::Joy &msg) {
+  if (msg.buttons[0] == 1) {
+    ODrive.SetVelocity(0, 0);
+    ODrive.SetVelocity(1, 0);
+
+    odriveSerial << "sc" << "\n";
+    delay(250);
+
+    calibrateMotor(0);
+    calibrateMotor(1);
+
+  } else if (msg.buttons[3] == 1) {
+    ODrive.SetVelocity(0, 0);
+    ODrive.SetVelocity(1, 0);
+
+    odriveSerial << "sr" << "\n";
+    delay(2000);
+
+    calibrateMotor(0);
+    calibrateMotor(1);
+  }
+}
+
+int64_t readErrors() {
+  int64_t errors[9];
+  errorStates.data_length = 9;
+
+  errors[0] = readODriveErrors();
+
+  errors[1] = readMotorErrors(0);
+  errors[2] = readMotorErrors(1);
+
+  errors[3] = readAxisErrors(0);
+  errors[4] = readAxisErrors(1);
+
+  errors[5] = readEncoderErrors(0);
+  errors[6] = readEncoderErrors(1);
+
+  errors[7] = readControllerErrors(0);
+  errors[8] = readControllerErrors(1);
+
+  errorStates.data = errors;
+
+  int64_t ret = 0;
+  for (int i=0; i<9; i++) {
+    ret |= errors[i] != 0;
+  }
+  
+  return ret;
+}
+
+int64_t readODriveErrors() {
+    odriveSerial << "error" << "\n";
+    return ODrive.readlong();
+}
+
+int64_t readMotorErrors(int motor_number) {
+    odriveSerial << "r axis" << motor_number << ".motor.error" << "\n";
+    return ODrive.readlong();
+}
+
+int64_t readAxisErrors(int axis_number) {
+    odriveSerial << "r axis" << axis_number << ".error" << "\n";
+    return ODrive.readlong();
+}
+
+int64_t readEncoderErrors(int encoder_number) {
+    odriveSerial << "r axis" << encoder_number << ".encoder.error" << "\n";
+    return ODrive.readlong();
+}
+
+int64_t readControllerErrors(int controller_number) {
+    odriveSerial << "r axis" << controller_number << ".controller.error" << "\n";
+    return ODrive.readlong();
 }
 
 float* cross(float x[3], float y[3]){
@@ -355,7 +457,6 @@ void publishSensorStates() {
   sensors.publish(&sensorStates);
 
 }
-
 
 void calibrateMotor(bool motornum) {
   char c = motornum+'0';
