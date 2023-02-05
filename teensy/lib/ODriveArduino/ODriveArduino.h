@@ -23,7 +23,6 @@ public:
     // General params
     float readFloat();
     int32_t readInt();
-    int64_t readlong();
 
     // State helper
     bool run_state(int axis, int requested_state, bool wait_for_idle, float timeout = 10.0f);
