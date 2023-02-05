@@ -39,6 +39,9 @@ public:
     int32_t readControllerErrors(int controller_number);
     // State helper
     bool run_state(int axis, int requested_state, bool wait_for_idle, float timeout = 10.0f);
+    // ODrive functions
+    void clearErrors();
+    void reboot();
 
 private:
 

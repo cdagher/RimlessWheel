@@ -139,3 +139,14 @@
     bool ODriveHelper::run_state(int axis, int requested_state, bool wait_for_idle, float timeout = 10.0f) {
         return _ODrive.run_state(axis, requested_state, wait_for_idle, timeout);
     }
+
+    // ODrive functions
+    void ODriveHelper::clearErrors() {
+        _serial << "sc" << "\n";
+        delay(50);
+    }
+    
+    void ODriveHelper::reboot() {
+        _serial << "sr" << "\n";
+        delay(100);
+    }
