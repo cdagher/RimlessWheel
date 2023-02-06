@@ -84,7 +84,7 @@
     // Errors
     int32_t ODriveHelper::readErrors(std_msgs::Int32MultiArray& errorStates) {
     int32_t errors[9];
-    errorStates.data_length = 9;
+    errorStates.data_length = 9; // TODO: mutex
 
     errors[0] = readODriveErrors();
 
