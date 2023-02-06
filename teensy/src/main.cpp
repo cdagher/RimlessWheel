@@ -50,6 +50,7 @@ bool impactOccurredBefore = false;
 void setup() {
 
   rosNode.begin();
+  errorStates.data_length = 9;
 
   // Serial output over USB
   Serial.begin(115200);
@@ -147,26 +148,86 @@ void receiveODriveCommand(const sensor_msgs::Joy &msg) {
     ODrive.SetVelocity(0, 0);
     ODrive.SetVelocity(1, 0);
 
-    odriveSerial << "sc" << "\n";
-    delay(250);
+    ODrive.clearErrors();
 
-    calibrateMotor(0);
-    calibrateMotor(1);
+    ODrive.calibrateMotor(0);
+    ODrive.calibrateMotor(1);
 
   } else if (msg.buttons[3] == 1) {
     ODrive.SetVelocity(0, 0);
     ODrive.SetVelocity(1, 0);
 
-    odriveSerial << "sr" << "\n";
-    delay(2000);
+    ODrive.reboot();
 
-    calibrateMotor(0);
-    calibrateMotor(1);
+    ODrive.calibrateMotor(0);
+    ODrive.calibrateMotor(1);
   }
 }
 
 bool encoderSymmetryCheck(float encPos0, float encPos1){
   return abs(encPos0 - encPos1) < 0.001;
+}
+
+
+bool impactDetected(){
+  return false;
+}
+
+float* cross(float x[3], float y[3]){
+
+  static float crossProd[3];
+  crossProd[0] = x[1]*y[2] - x[2]*y[1];
+  crossProd[1] = x[2]*y[0] - x[0]*y[2];
+  crossProd[2] = x[0]*y[1] - x[1]*y[0];
+
+  return crossProd;
+
+}
+
+float alphaDynamics(float u, float theta, float phi, float thetadot, float phidot){
+
+  float BCG[2] = {-u + m2*l1*l2*sinf(theta-phi)*powf(phidot, 2.0f) + g*mt*l1*sinf(theta-incline), 
+                  u - m2*l1*l2*sinf(theta-phi)*powf(thetadot, 2.0f) - g*m2*l2*sinf(phi-incline)};
+  float detM = (-I1*I2 - I1*powf(l2,2.0f)*m2 - I2*powf(l1, 2.0f)*mt + powf(cosf(theta-phi)*l1*l2*m2, 2.0f) - powf(l1*l2, 2.0f)*m2*mt);
+  
+  float phidotdot = 1.0f/detM*( (-cosf(theta-phi)*l1*l2*m2)*BCG[0] + (-I1 - powf(l1, 2.0f)*mt)*BCG[1]);
+  
+  return phidotdot;
+}
+
+float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro, float alpha_x){
+  
+  static float acc_COM[3]; 
+
+  float imuToCOM[3] = {0.0f, 0.0f, 0.0f};
+  float omega[3]    = {gyro.gyro.x, gyro.gyro.y, gyro.gyro.z};
+  float ap[3]       = {accel.acceleration.x, accel.acceleration.y, accel.acceleration.z};
+  float alpha[3]    = {alpha_x, 0.0f, 0.0f}; //assumes the robot has no tolerance/play in the y and z direction
+
+  auto omegaCrossR  = cross(omega, imuToCOM);
+  auto alphaCrossR  = cross(alpha, imuToCOM);
+  auto omegaCrossOmegaCrossR = cross(omega, omegaCrossR); 
+
+  for (int i = 0; i < 3; ++i){
+    acc_COM[i] = ap[i] - alphaCrossR[i] - omegaCrossOmegaCrossR[i];
+  }
+
+  return acc_COM;
+}
+
+float* impactMap(float phi, float thetadot, float phidot){
+
+  float det = I1*I2 + I1*m2*powf(l2, 2.0f) + I2*mt*powf(l1, 2.0f) + m2*powf(l1*l2, 2.0f)*(m1 + m2*powf(sinf(alpha - phi),2.0f));
+
+  float a1 = 1.0f/det * ((I1*I2 + I1*m2*powf(l2, 2.0f)) + 
+          (I2*mt*powf(l1, 2.0f) + m2*powf(l1*l2, 2.0f)*(m1 + 0.5f* m2))*cosf(2.0f*alpha) -
+          0.5*powf(m2*l1*l2, 2.0f)*cosf(2.0f*phi));
+
+  float a2 = 1.0f/det *(m2*l1*l2*(I1*(cosf(alpha - phi) - cosf(alpha + phi)) + 
+          mt*powf(l1, 2.0f)*(cosf(2.0f*alpha)*cosf(alpha - phi) - cosf(alpha + phi))) );
+
+  static float vel[2] = {a1*thetadot, a2*thetadot+phidot};
+  return vel;
 }
 
 void publishSensorStates() {
@@ -280,65 +341,4 @@ void publishSensorStates() {
   sensorStates.velocity = sensorVelocity;
   sensors.publish(&sensorStates);
 
-}
-
-float* cross(float x[3], float y[3]){
-
-  static float crossProd[3];
-  crossProd[0] = x[1]*y[2] - x[2]*y[1];
-  crossProd[1] = x[2]*y[0] - x[0]*y[2];
-  crossProd[2] = x[0]*y[1] - x[1]*y[0];
-
-  return crossProd;
-
-}
-
-float alphaDynamics(float u, float theta, float phi, float thetadot, float phidot){
-
-  float BCG[2] = {-u + m2*l1*l2*sinf(theta-phi)*powf(phidot, 2.0f) + g*mt*l1*sinf(theta-incline), 
-                  u - m2*l1*l2*sinf(theta-phi)*powf(thetadot, 2.0f) - g*m2*l2*sinf(phi-incline)};
-  float detM = (-I1*I2 - I1*powf(l2,2.0f)*m2 - I2*powf(l1, 2.0f)*mt + powf(cosf(theta-phi)*l1*l2*m2, 2.0f) - powf(l1*l2, 2.0f)*m2*mt);
-  
-  float phidotdot = 1.0f/detM*( (-cosf(theta-phi)*l1*l2*m2)*BCG[0] + (-I1 - powf(l1, 2.0f)*mt)*BCG[1]);
-  
-  return phidotdot;
-}
-
-float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro, float alpha_x){
-  
-  static float acc_COM[3]; 
-
-  float imuToCOM[3] = {0.0f, 0.0f, 0.0f};
-  float omega[3]    = {gyro.gyro.x, gyro.gyro.y, gyro.gyro.z};
-  float ap[3]       = {accel.acceleration.x, accel.acceleration.y, accel.acceleration.z};
-  float alpha[3]    = {alpha_x, 0.0f, 0.0f}; //assumes the robot has no tolerance/play in the y and z direction
-
-  auto omegaCrossR  = cross(omega, imuToCOM);
-  auto alphaCrossR  = cross(alpha, imuToCOM);
-  auto omegaCrossOmegaCrossR = cross(omega, omegaCrossR); 
-
-  for (int i = 0; i < 3; ++i){
-    acc_COM[i] = ap[i] - alphaCrossR[i] - omegaCrossOmegaCrossR[i];
-  }
-
-  return acc_COM;
-}
-
-bool impactDetected(){
-  return false;
-}
-
-float* impactMap(float phi, float thetadot, float phidot){
-
-  float det = I1*I2 + I1*m2*powf(l2, 2.0f) + I2*mt*powf(l1, 2.0f) + m2*powf(l1*l2, 2.0f)*(m1 + m2*powf(sinf(alpha - phi),2.0f));
-
-  float a1 = 1.0f/det * ((I1*I2 + I1*m2*powf(l2, 2.0f)) + 
-          (I2*mt*powf(l1, 2.0f) + m2*powf(l1*l2, 2.0f)*(m1 + 0.5f* m2))*cosf(2.0f*alpha) -
-          0.5*powf(m2*l1*l2, 2.0f)*cosf(2.0f*phi));
-
-  float a2 = 1.0f/det *(m2*l1*l2*(I1*(cosf(alpha - phi) - cosf(alpha + phi)) + 
-          mt*powf(l1, 2.0f)*(cosf(2.0f*alpha)*cosf(alpha - phi) - cosf(alpha + phi))) );
-
-  static float vel[2] = {a1*thetadot, a2*thetadot+phidot};
-  return vel;
 }
