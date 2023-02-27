@@ -77,8 +77,8 @@ Adafruit_Mahony filter;  // fastest/smalleset
 #define FILTER_UPDATE_RATE_HZ 100
 #define PRINT_EVERY_N_UPDATES 10
 #define AHRS_DEBUG_OUTPUT
-#define TORQUE_CONTROL
-// #define ODRIVE_CONNECTED
+// #define TORQUE_CONTROL
+#define ODRIVE_CONNECTED
 
 const float m1 = 2.32f;    
 const float m2 = 4.194f; 
@@ -182,9 +182,7 @@ void loop() {
 void receiveJointState(const sensor_msgs::JointState &msg) {
 
 #if defined(TORQUE_CONTROL)
-  float torque = msg.effort[0];
-  Serial.print("Received torque command: ");
-  Serial.print(torque);
+  // float torque = msg.effort[0];
   //  ODrive.SetCurrent(0, torque/Kv);
   //  ODrive.SetCurrent(1, torque/Kv);
  
