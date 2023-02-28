@@ -1,18 +1,18 @@
 <launch>
-    <arg name="controller" default="joystick" />
+    <arg name="controller" default="nn_controller" />
     
     <group if="$(eval controller == 'nn_controller')">
-        <node name="nn_controller" pkg="raspi_pkg" type="evaluatePbc.jl"/>
+        <node name="nn_controller" pkg="julia_pkg" type="evaluatePbc.jl"/>
     </group>
 
-    <group if="$(eval controller == 'joystick')">
+    <!-- <group if="$(eval controller == 'joystick')">
         <node name="rqt_robot_steering" pkg="rqt_robot_steering" type="rqt_robot_steering">
             <param name="default_topic" value="/cmd_vel" />
             <param name="default_vx_max" value="1.0" />
             <param name="default_vx_min" value="-1.0" />
         </node>
-        <node name="raspi_pkg_node" pkg="raspi_pkg" type="raspi_pkg_node"/>
+        <node name="julia_pkg_node" pkg="julia_pkg" type="julia_pkg_node"/>
 
-    </group>
+    </group> -->
 
 </launch>

@@ -1,8 +1,9 @@
 #!/usr/bin/env julia
 using Pkg
+cd("/home/bsurobotics/repos/RimlessWheel/julia_ws/catkin_ws/src/julia_pkg/src")
 Pkg.activate(".")
 
-using DiffEqFlux
+using DiffEqFlux, MLBasedESC
 using LinearAlgebra, BSON
 using RobotOS
 
@@ -18,7 +19,6 @@ const α   = Float32(360.0/k/2.0 * pi/180.0)
 const DEG_TO_RAD = pi/180.0
 
 inputLayer(x) = [cos(x[1]), sin(x[1]), cos(x[2]), sin(x[2]), x[3], x[4]]        #x[1] = torso, x[2] = spoke
-x0 = initialState(pi, -1.0f0, 0.0f0, 0.0f0)
 
 Hd = FastChain(
         FastDense(6, 8, elu, bias=true),
@@ -27,9 +27,9 @@ Hd = FastChain(
     )
 
 npbc = MLBasedESC.NeuralPBC(6, Hd)
-ps = BSON.load("saved_weights/deterministic_hardware_6-8-8-5-5-1_elu.bson")[:param]
+ps = BSON.load("./saved_weights/deterministic_hardware_6-8-8-7-7-1_elu.bson")[:param]
 
-function initialState(θ0, θ0dot, ϕ0, ϕ0dot)
+function initialState(ϕ0, θ0, ϕ0dot, θ0dot)
     @assert pi-α <= θ0 <= pi+α "Give an initial spoke angle for the spoke in contact. This will help set the rimless wheel in contact with the surface"
     
     x = l1*sin(pi-θ0)
@@ -44,7 +44,7 @@ function initialState(θ0, θ0dot, ϕ0, ϕ0dot)
     return [x, y, ϕ, θ, xdot, ydot, ϕdot, θdot]
 end
 
-function update_state!(msg::JointState, state::Vector)
+function update_state!(msg::sensor_msgs.msg.JointState, state::Vector)
     state[1] = msg.position[1]*DEG_TO_RAD       #torso
     state[2] = msg.position[2]*DEG_TO_RAD       #spokes
     state[3] = msg.velocity[1]*DEG_TO_RAD
@@ -58,7 +58,7 @@ function main()
     sub = Subscriber{JointState}("/sensors", update_state!, (state,), queue_size=1)
     @info "ROS node initialized. Loading models..."
 
-    x0 = initialState(pi, -1.0f0, 0.0f0, 0.0f0)
+    x0 = initialState(0.0f0, pi, 0.0f0, 0.0f0)
     torque = MLBasedESC.controller(npbc, inputLayer(x0), ps)
 
     @info "Model loaded. Spinning ROS..."
