@@ -78,15 +78,15 @@ Adafruit_Mahony filter;  // fastest/smalleset
 #define PRINT_EVERY_N_UPDATES 10
 #define AHRS_DEBUG_OUTPUT
 #define TORQUE_CONTROL
-// #define ODRIVE_CONNECTED
+#define ODRIVE_CONNECTED
 
-const float m1 = 2.32f;    
-const float m2 = 4.194f; 
-const float I1 = 0.0784160f;
-const float I2 = 0.0380256f;
+const float m1 = 1.13f;    
+const float m2 = 3.385f; 
+const float l1 = 0.3f;
+const float l2 = 0.06f;
+const float I1 = 0.0885f/2.0f;
+const float I2 = m2*l2*l2/3.0f;
 const float mt = m1 + m2;
-const float l1 = 0.26f;
-const float l2 = 0.05f;
 const float g  = 9.81f;
 const float incline = 0.0f; 
 const float k = 10.0f;
@@ -185,8 +185,8 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
   float torque = msg.effort[0];
   Serial.print("Received torque command: ");
   Serial.print(torque);
-  //  ODrive.SetCurrent(0, torque/Kv);
-  //  ODrive.SetCurrent(1, torque/Kv);
+  ODrive.SetCurrent(0, -torque/2/Kv);
+  ODrive.SetCurrent(1, torque/2/Kv);
  
 #else
  #if defined(ODRIVE_CONNECTED)
@@ -332,8 +332,8 @@ void publishSensorStates() {
 
   #if defined(ODRIVE_CONNECTED)
     //Read encoder from ODrive
-    // encPos0 = ODrive.GetPosition(0);
-    // encPos1 = ODrive.GetPosition(1);
+    encPos0 = ODrive.GetPosition(0);
+    encPos1 = ODrive.GetPosition(1);
 
     assert(encoderSymmetryCheck(encPos0, encPos1));
 
@@ -341,8 +341,8 @@ void publishSensorStates() {
     // encVel0 = ODrive.GetVelocity(0);
     // encVel1 = ODrive.GetVelocity(1);
 
-    // float encVel0 = (encPos0 - oldSpoke1Angle)/samplingTime;
-    // float encVel1 = (encPos1 - oldSpoke2Angle)/samplingTime;
+    encVel0 = (encPos0 - oldSpoke1Angle)/samplingTime;
+    encVel1 = (encPos1 - oldSpoke2Angle)/samplingTime;
     #endif
 
   sensors_event_t accel, gyro, mag;

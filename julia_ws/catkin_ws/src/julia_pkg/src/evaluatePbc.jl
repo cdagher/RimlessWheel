@@ -8,12 +8,12 @@ using LinearAlgebra, BSON
 using RobotOS
 
 @rosimport sensor_msgs.msg: JointState
-@rosimport std_msgs.msg: Float64
+@rosimport std_msgs.msg: Float32
 rostypegen()
 using .sensor_msgs.msg, .std_msgs.msg
 
-const l1  = 0.26f0                  #wheel
-const l2  = 0.05f0                  #torso
+const l1  = 0.3f0                  #wheel
+const l2  = 0.06f0                  #torso
 const k   = 10
 const α   = Float32(360.0/k/2.0 * pi/180.0)
 const DEG_TO_RAD = pi/180.0
@@ -53,7 +53,7 @@ end
 
 function main()
     init_node("nn_controller")
-    state = zeros(Float64,4)
+    state = zeros(Float32,4)
     pub = Publisher{JointState}("/torso_command", queue_size=1)
     sub = Subscriber{JointState}("/sensors", update_state!, (state,), queue_size=1)
     @info "ROS node initialized. Loading models..."
