@@ -45,15 +45,16 @@ function initialState(ϕ0, θ0, ϕ0dot, θ0dot)
 end
 
 function update_state!(msg::sensor_msgs.msg.JointState, state::Vector)
-    state[1] = msg.position[1]*DEG_TO_RAD       #torso
-    state[2] = msg.position[2]*DEG_TO_RAD       #spokes
-    state[3] = msg.velocity[1]*DEG_TO_RAD
-    state[4] = msg.velocity[2]*DEG_TO_RAD
+    state[1] = msg.position[1]       #torso
+    state[2] = pi + msg.position[2]       #spokes
+    state[3] = msg.velocity[1]
+    state[4] = msg.velocity[2]
 end
 
 function main()
     init_node("nn_controller")
     state = zeros(Float32,4)
+    sensorData = Vector{Vector{Float32}}()
     pub = Publisher{JointState}("/torso_command", queue_size=1)
     sub = Subscriber{JointState}("/sensors", update_state!, (state,), queue_size=1)
     @info "ROS node initialized. Loading models..."
@@ -62,17 +63,19 @@ function main()
     torque = MLBasedESC.controller(npbc, inputLayer(x0), ps)
 
     @info "Model loaded. Spinning ROS..."
-    loop_rate = Rate(1000.0)
+    loop_rate = Rate(100.0)
     torque_msg = JointState();
     while !is_shutdown()
         torque_msg.header = std_msgs.msg.Header()
         torque_msg.header.stamp = RobotOS.now()
+        push!(sensorData, state)
         torque = MLBasedESC.controller(npbc, inputLayer(state), ps)
         torque_msg.effort = zeros(1)
         torque_msg.effort[1] = torque
         publish(pub, torque_msg)
         rossleep(loop_rate)
     end
+    BSON.@save "/home/bsurobotics/repos/RimlessWheel/julia_ws/catkin_ws/src/julia_pkg/src/hardware_data/sensor_data.bson" sensorData
     safe_shutdown_hack()
 end
 

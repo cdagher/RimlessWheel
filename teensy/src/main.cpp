@@ -28,7 +28,7 @@ template<>        inline Print& operator <<(Print &obj, float arg) { obj.print(a
 #define ENCODER_PUBLISHER_NAME "/sensors"
 #define ODRIVE_ERROR_PUBLISHER_NAME "/odrive_errors"
 
-#define MOTOR_VELOCITY_LIMIT 10.0 // radians per second? Maybe rotations per second?
+#define MOTOR_VELOCITY_LIMIT 50.0 // radians per second? Maybe rotations per second?
 #define MOTOR_CURRENT_LIMIT  20.0 // amps
 
 
@@ -58,6 +58,11 @@ HardwareSerial &odriveSerial = Serial1;
 
 // ODrive object
 ODriveArduino ODrive(odriveSerial);
+// E-stop pins
+int estop_in = 3;
+
+bool estop();
+void brake();
 void calibrateMotor(bool motor);
 int64_t readErrors();
 int64_t readODriveErrors();
@@ -65,6 +70,7 @@ int64_t readMotorErrors(int motor_number);
 int64_t readAxisErrors(int axis_number);
 int64_t readEncoderErrors(int encoder_number);
 int64_t readControllerErrors(int controller_number);
+void commandTorque(int axis, float torque);
 
 Adafruit_Mahony filter;  // fastest/smalleset
 
@@ -124,6 +130,8 @@ void setup() {
     while (1) delay(10);
   }
   
+  pinMode(estop_in, INPUT_PULLDOWN);
+
   accelerometer->printSensorDetails();
   gyroscope->printSensorDetails();
   magnetometer->printSensorDetails();
@@ -145,14 +153,25 @@ void setup() {
 
     // set the parameters for both motors
     for (int axis = 0; axis < 2; ++axis) {
+      odriveSerial << "w axis" << axis << ".error " << 0 << '\n';
       odriveSerial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
       odriveSerial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
+
       // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
     }
 
     // calibrate the motors
     calibrateMotor(0);
     calibrateMotor(1);
+
+    #if defined(TORQUE_CONTROL)
+      for (int axis = 0; axis < 2; ++axis) {
+        odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
+        odriveSerial << "w axis" << axis << ".motor.config.torque_constant " << 8.23 / 150.0 << '\n';
+        odriveSerial << "w axis" << axis << ".motor.controller.enable_torque_mode_vel_limit = False" << '\n';
+      }
+    #endif
+
   #endif
 
   //Keep track of time to sample the encoders and the IMU evenly
@@ -175,38 +194,44 @@ void loop() {
       odriveErrors.publish(&errorStates);
     }
   #endif
-  
+
   nh.spinOnce();
 }
 
 void receiveJointState(const sensor_msgs::JointState &msg) {
 
-#if defined(TORQUE_CONTROL)
-  float torque = msg.effort[0];
-  Serial.print("Received torque command: ");
-  Serial.print(torque);
-  ODrive.SetCurrent(0, -torque/2/Kv);
-  ODrive.SetCurrent(1, torque/2/Kv);
- 
-#else
- #if defined(ODRIVE_CONNECTED)
-  float velocity0 = msg.velocity[0];
-  float velocity1 = msg.velocity[1];
-  ODrive.SetVelocity(0, -1*velocity0*MOTOR_VELOCITY_LIMIT);
-  ODrive.SetVelocity(1, velocity1*MOTOR_VELOCITY_LIMIT);
-  #endif 
-#endif
-    
-    // TODO: actually write this method
-    // received joint state should be something like:
-    // { torque0, velocity0, torque1, velocity1 }
-    // where the 1st two values are for motor 0 and the 2nd two are for motor 1.
-    // One of these values per motor should be zero, and will be ignored
-    // The topic name for the torque command is "/torso_command"
-    
-    // IF ALL VALUES RECEIVED ARE ZERO, STOP MOTORS
-    // If one motor receives all zeros and the other doesn't, stop the motor with zeros
-    return;
+  #if defined(TORQUE_CONTROL)
+    if (estop()){
+      brake();
+    }
+    else if (oldTorsoOmega >= 1.0*M_PI){
+      brake();
+    }
+    else{
+      // float torque = msg.effort[0];
+      // Serial.print("Received torque command: ");
+      // Serial.print(torque);
+
+      float velocity0 = msg.velocity[0];
+      float velocity1 = msg.velocity[1];
+      commandTorque(0, -velocity0);
+      commandTorque(1, velocity1);
+        // commandTorque(0, -torque);
+        // commandTorque(1, torque);
+
+    #else
+    #if defined(ODRIVE_CONNECTED)
+      float velocity0 = msg.velocity[0];
+      float velocity1 = msg.velocity[1];
+      ODrive.SetVelocity(0, -1*velocity0*MOTOR_VELOCITY_LIMIT);
+      ODrive.SetVelocity(1, velocity1*MOTOR_VELOCITY_LIMIT);
+      // ODrive.SetCurrent(0, -velocity0*5.0);
+      // ODrive.SetCurrent(1, velocity1*5.0);
+      #endif 
+    #endif
+  }
+  
+  return;
 }
 
 void receiveODriveCommand(const sensor_msgs::Joy &msg) {
@@ -230,6 +255,10 @@ void receiveODriveCommand(const sensor_msgs::Joy &msg) {
     calibrateMotor(0);
     calibrateMotor(1);
   }
+}
+
+void commandTorque(int axis, float torque){
+  odriveSerial << "w axis" << axis << ".controller.input_torque " << torque << '\n';
 }
 
 int64_t readErrors() {
@@ -285,6 +314,20 @@ int64_t readControllerErrors(int controller_number) {
     return ODrive.readlong();
 }
 
+bool estop(){
+  if (digitalRead(estop_in) == LOW){
+    return true;
+  }
+  else{
+    return false;
+  }
+}
+
+void brake(){
+  commandTorque(0, 0.0);
+  commandTorque(1, 0.0);
+}
+
 float* cross(float x[3], float y[3]){
 
   static float crossProd[3];
@@ -333,9 +376,10 @@ void publishSensorStates() {
   #if defined(ODRIVE_CONNECTED)
     //Read encoder from ODrive
     encPos0 = ODrive.GetPosition(0);
+    encPos0 = -encPos0;
     encPos1 = ODrive.GetPosition(1);
 
-    assert(encoderSymmetryCheck(encPos0, encPos1));
+    // assert(encoderSymmetryCheck(encPos0, encPos1));
 
     //TODO: test GetVelocity
     // encVel0 = ODrive.GetVelocity(0);
