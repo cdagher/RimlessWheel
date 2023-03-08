@@ -42,7 +42,7 @@ void receiveODriveCommand(const sensor_msgs::Joy &msg);
 sensor_msgs::Joy odriveCommand; // commands for clearing errors, rebooting, etc
 ros::Subscriber<sensor_msgs::Joy> odriveCmd(ODRIVE_SUBSCRIBER_NAME, &receiveODriveCommand);
 
-void publishSensorStates();
+void publishSensorStates(const float* torsoStates, const float* spokeStates );
 sensor_msgs::JointState sensorStates; // feedback of the encoder positions
 ros::Publisher sensors(ENCODER_PUBLISHER_NAME, &sensorStates);
 
@@ -70,7 +70,10 @@ int64_t readMotorErrors(int motor_number);
 int64_t readAxisErrors(int axis_number);
 int64_t readEncoderErrors(int encoder_number);
 int64_t readControllerErrors(int controller_number);
+float* readEncoder();
+float* readIMU();
 void commandTorque(int axis, float torque);
+void computeTorque(const float* torsoStates, const float* spokeStates );
 
 Adafruit_Mahony filter;  // fastest/smalleset
 
@@ -101,9 +104,14 @@ const float Kv = 0.13f;
 
 const float samplingTime = 1.0f/FILTER_UPDATE_RATE_HZ;
 float oldTorsoOmega = 0.0f;
-float oldSpoke1Angle = M_PI - alpha;
-float oldSpoke2Angle = M_PI - alpha;
+float oldSpoke1Angle = alpha;
+float oldSpoke2Angle = alpha;
 float oldSpokeSpeed = 0.0f;
+float torque0 = 0.0;
+float torque1 = 0.0;
+float enc0Offset = 0.0;
+float enc1Offset = 0.0;
+
 uint32_t timestamp;
 bool impactOccurredBefore = false;
 
@@ -145,6 +153,9 @@ void setup() {
     // ODrive uses 115200 as the baudrate
     odriveSerial.begin(115200);
 
+    // odriveSerial << "sr" << "\n";
+    // delay(5000);
+    
     // TODO: figure out why this returns zero. Maybe the ODrive needs a FW update?
     odriveSerial << "r vbus_voltage\n";
     Serial << "Vbus voltage: " << ODrive.readFloat() << '\n';
@@ -163,6 +174,16 @@ void setup() {
     // calibrate the motors
     calibrateMotor(0);
     calibrateMotor(1);
+
+    // for (int axis = 0; axis < 2; ++axis) {
+    //   odriveSerial << "w axis" << axis << ".controller.config.control_mode " << AXIS_STATE_CLOSED_LOOP_CONTROL << '\n';
+    //   odriveSerial << "w axis" << axis << ".controller.input_pos = 0 " << '\n'; 
+    // }
+    
+    auto spokeStates = readEncoder();
+    delay(250);
+    enc0Offset = spokeStates[0];
+    enc1Offset = spokeStates[1];
 
     #if defined(TORQUE_CONTROL)
       for (int axis = 0; axis < 2; ++axis) {
@@ -187,37 +208,66 @@ void loop() {
   }
 
   timestamp = millis();
-  publishSensorStates();
+  auto torsoStates = readIMU();
+  auto getSpokeStates = readEncoder();
+
   #if defined(ODRIVE_CONNECTED)
     if (readErrors() != 0) {
       // TODO: clear non-critical errors
       odriveErrors.publish(&errorStates);
     }
   #endif
+  publishSensorStates(torsoStates, getSpokeStates);
 
+  computeTorque(torsoStates, getSpokeStates);
   nh.spinOnce();
+}
+
+void computeTorque(const float* torsoStates, const float* spokeStates){
+  if (estop()){
+      brake();
+      while (estop()) {
+        auto getSpokeStates = readEncoder();
+        Serial.print("Sensor: ");
+        Serial.print(getSpokeStates[0]);
+        Serial.print(", ");
+        Serial.print(getSpokeStates[1]);
+        Serial.print(", ");
+        Serial.print("Error: ");
+        Serial.println(0.5*(getSpokeStates[0] - getSpokeStates[1]));
+      }
+      for (int axis = 0; axis < 2; axis++) {
+        odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
+      }
+    }
+  else if (oldTorsoOmega >= 1.0*M_PI){
+    brake();
+    for (int axis = 0; axis < 2; axis++) {
+      odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
+    }
+  }
+  else{
+
+    commandTorque(0, -torque0);
+    commandTorque(1, torque1 + 0.0*(sinf(spokeStates[0]) - sinf(spokeStates[1])));
+  }
 }
 
 void receiveJointState(const sensor_msgs::JointState &msg) {
 
   #if defined(TORQUE_CONTROL)
-    if (estop()){
-      brake();
-    }
-    else if (oldTorsoOmega >= 1.0*M_PI){
-      brake();
-    }
-    else{
+
+      ///////////// for neural net //////////////
+
       // float torque = msg.effort[0];
       // Serial.print("Received torque command: ");
       // Serial.print(torque);
+      // torque0 = torque;
+      // torque1 = torque;
 
-      float velocity0 = msg.velocity[0];
-      float velocity1 = msg.velocity[1];
-      commandTorque(0, -velocity0);
-      commandTorque(1, velocity1);
-        // commandTorque(0, -torque);
-        // commandTorque(1, torque);
+      ///////////// for joystick ////////////////////
+      torque0 = msg.velocity[0];
+      torque1 = torque0;
 
     #else
     #if defined(ODRIVE_CONNECTED)
@@ -225,11 +275,9 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
       float velocity1 = msg.velocity[1];
       ODrive.SetVelocity(0, -1*velocity0*MOTOR_VELOCITY_LIMIT);
       ODrive.SetVelocity(1, velocity1*MOTOR_VELOCITY_LIMIT);
-      // ODrive.SetCurrent(0, -velocity0*5.0);
-      // ODrive.SetCurrent(1, velocity1*5.0);
+
       #endif 
     #endif
-  }
   
   return;
 }
@@ -259,6 +307,178 @@ void receiveODriveCommand(const sensor_msgs::Joy &msg) {
 
 void commandTorque(int axis, float torque){
   odriveSerial << "w axis" << axis << ".controller.input_torque " << torque << '\n';
+}
+
+bool estop(){
+  if (digitalRead(estop_in) == LOW){
+    return true;
+  }
+  else{
+    return false;
+  }
+}
+
+void brake(){
+  for (int axis = 0; axis < 2; ++axis) {
+    odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
+  }
+  ODrive.SetVelocity(0, 0);
+  ODrive.SetVelocity(1, 0);
+   
+}
+
+float* cross(float x[3], float y[3]){
+
+  static float crossProd[3];
+  crossProd[0] = x[1]*y[2] - x[2]*y[1];
+  crossProd[1] = x[2]*y[0] - x[0]*y[2];
+  crossProd[2] = x[0]*y[1] - x[1]*y[0];
+
+  return crossProd;
+
+}
+
+float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro, float alpha_x){
+  
+  static float acc_COM[3]; 
+
+  float imuToCOM[3] = {0.0f, 0.0f, 0.0f};
+  float omega[3]    = {gyro.gyro.x, gyro.gyro.y, gyro.gyro.z};
+  float ap[3]       = {accel.acceleration.x, accel.acceleration.y, accel.acceleration.z};
+  float alpha[3]    = {alpha_x, 0.0f, 0.0f}; //assumes the robot has no tolerance/play in the y and z direction
+
+  auto omegaCrossR  = cross(omega, imuToCOM);
+  auto alphaCrossR  = cross(alpha, imuToCOM);
+  auto omegaCrossOmegaCrossR = cross(omega, omegaCrossR); 
+
+  for (int i = 0; i < 3; ++i){
+    acc_COM[i] = ap[i] - alphaCrossR[i] - omegaCrossOmegaCrossR[i];
+  }
+
+  return acc_COM;
+}
+
+float* readEncoder(){
+
+  static float spokeStates[4];
+  for(int i=0; i <= 1; i++){
+    spokeStates[0] = -1.0*ODrive.GetPosition(0) - enc0Offset;
+    spokeStates[1] = ODrive.GetPosition(1) - enc1Offset;
+  }
+
+  //TODO: test GetVelocity
+  // encVel0 = ODrive.GetVelocity(0);
+  // encVel1 = ODrive.GetVelocity(1);
+
+  spokeStates[2] = (spokeStates[0] - oldSpoke1Angle)/samplingTime;
+  spokeStates[3] = (spokeStates[1] - oldSpoke2Angle)/samplingTime;
+  oldSpoke1Angle = spokeStates[0] ;
+  oldSpoke2Angle = spokeStates[1]; 
+  oldSpokeSpeed = spokeStates[2];
+
+  return spokeStates;
+}
+
+float* readIMU(){
+
+  static float torsoStates[2]; 
+
+  //All angles are given in radians.
+  sensors_event_t accel, gyro, mag;
+  accelerometer->getEvent(&accel);
+  gyroscope->getEvent(&gyro);
+  magnetometer->getEvent(&mag);
+
+  cal.calibrate(mag);
+  cal.calibrate(accel);
+  cal.calibrate(gyro);
+  
+  //Update torso angular velocity
+  torsoStates[1] = gyro.gyro.x;
+
+  // Compute the angular acceleration from the dynamics inorder to shift the linear acceleration at the COM
+  //find shifted linear acceleration
+  
+  float alpha_x = (torsoStates[1] - oldTorsoOmega)/samplingTime;
+  auto acc_COM = comAcceleration(accel, gyro, alpha_x);
+
+  // Gyroscope needs to be converted from Rad/s to Degree/s
+  // the rest are not unit-important
+  float gx, gy, gz;
+  gx = gyro.gyro.x * SENSORS_RADS_TO_DPS;
+  gy = gyro.gyro.y * SENSORS_RADS_TO_DPS;
+  gz = gyro.gyro.z * SENSORS_RADS_TO_DPS;
+
+  // Update the SensorFusion filter
+  filter.update(gx, gy, gz, 
+                acc_COM[0], acc_COM[1], acc_COM[2], 
+                mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
+
+  torsoStates[0] = filter.getRoll() * 1.0f/SENSORS_RADS_TO_DPS;
+  // float torsoHeading = filter.getYaw() * 1.0f/SENSORS_RADS_TO_DPS;
+  // float torsoPitch   = filter.getPitch() * 1.0f/SENSORS_RADS_TO_DPS;
+
+  oldTorsoOmega = torsoStates[1];
+
+  return torsoStates;
+}
+
+void publishSensorStates(const float* torsoStates, const float* spokeStates) {
+
+  float encPos0 = spokeStates[0];
+  float encPos1 = spokeStates[1];
+  float encVel0 = spokeStates[2];
+  float encVel1 = spokeStates[3];
+  float torsoRoll = torsoStates[0];
+  float torsoOmega = torsoStates[1];
+
+  #if defined(AHRS_DEBUG_OUTPUT)
+    Serial.print("Sensor: ");
+    Serial.print(torsoRoll);
+    Serial.print(", ");
+    Serial.print( encPos0);
+    Serial.print(", ");
+    Serial.println(encPos1);
+    Serial.print("Angular velocities: ");
+    Serial.println(torsoOmega);
+    Serial.print(", ");
+    Serial.print(encVel0);
+    Serial.print(", ");
+    Serial.println(encVel1);
+  #endif
+
+  sensorStates.position_length = 3;
+  sensorStates.velocity_length = 3;
+  float sensorPosition[3] = 
+      {
+      torsoRoll, encPos0, encPos1,
+      };
+  float sensorVelocity[3] = 
+      {
+      torsoOmega, encVel0, encVel1
+    };
+
+  sensorStates.position = sensorPosition;
+  sensorStates.velocity = sensorVelocity;
+  sensors.publish(&sensorStates);
+
+}
+
+void calibrateMotor(bool motornum) {
+  char c = motornum+'0';
+  int requested_state;
+
+  requested_state = AXIS_STATE_MOTOR_CALIBRATION;
+  Serial << "Axis" << c << ": Requesting state " << requested_state << '\n';
+  if(!ODrive.run_state(motornum, requested_state, true)) return;
+
+  requested_state = AXIS_STATE_ENCODER_OFFSET_CALIBRATION;
+  Serial << "Axis" << c << ": Requesting state " << requested_state << '\n';
+  if(!ODrive.run_state(motornum, requested_state, true, 25.0f)) return;
+
+  requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL;
+  Serial << "Axis" << c << ": Requesting state " << requested_state << '\n';
+  if(!ODrive.run_state(motornum, requested_state, false /*don't wait*/)) return;
 }
 
 int64_t readErrors() {
@@ -312,162 +532,4 @@ int64_t readEncoderErrors(int encoder_number) {
 int64_t readControllerErrors(int controller_number) {
     odriveSerial << "r axis" << controller_number << ".controller.error" << "\n";
     return ODrive.readlong();
-}
-
-bool estop(){
-  if (digitalRead(estop_in) == LOW){
-    return true;
-  }
-  else{
-    return false;
-  }
-}
-
-void brake(){
-  commandTorque(0, 0.0);
-  commandTorque(1, 0.0);
-}
-
-float* cross(float x[3], float y[3]){
-
-  static float crossProd[3];
-  crossProd[0] = x[1]*y[2] - x[2]*y[1];
-  crossProd[1] = x[2]*y[0] - x[0]*y[2];
-  crossProd[2] = x[0]*y[1] - x[1]*y[0];
-
-  return crossProd;
-
-}
-
-float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro, float alpha_x){
-  
-  static float acc_COM[3]; 
-
-  float imuToCOM[3] = {0.0f, 0.0f, 0.0f};
-  float omega[3]    = {gyro.gyro.x, gyro.gyro.y, gyro.gyro.z};
-  float ap[3]       = {accel.acceleration.x, accel.acceleration.y, accel.acceleration.z};
-  float alpha[3]    = {alpha_x, 0.0f, 0.0f}; //assumes the robot has no tolerance/play in the y and z direction
-
-  auto omegaCrossR  = cross(omega, imuToCOM);
-  auto alphaCrossR  = cross(alpha, imuToCOM);
-  auto omegaCrossOmegaCrossR = cross(omega, omegaCrossR); 
-
-  for (int i = 0; i < 3; ++i){
-    acc_COM[i] = ap[i] - alphaCrossR[i] - omegaCrossOmegaCrossR[i];
-  }
-
-  return acc_COM;
-}
-
-bool encoderSymmetryCheck(float encPos0, float encPos1){
-  return abs(encPos0 - encPos1) < 0.001;
-}
-
-void publishSensorStates() {
-
-  //All angles are given in radians.
-
-  float encPos0 = 0.0;
-  float encPos1 = 0.0;
-  float encVel0 = 0.0;
-  float encVel1 = 0.0;
-  float gx, gy, gz;
-
-  #if defined(ODRIVE_CONNECTED)
-    //Read encoder from ODrive
-    encPos0 = ODrive.GetPosition(0);
-    encPos0 = -encPos0;
-    encPos1 = ODrive.GetPosition(1);
-
-    // assert(encoderSymmetryCheck(encPos0, encPos1));
-
-    //TODO: test GetVelocity
-    // encVel0 = ODrive.GetVelocity(0);
-    // encVel1 = ODrive.GetVelocity(1);
-
-    encVel0 = (encPos0 - oldSpoke1Angle)/samplingTime;
-    encVel1 = (encPos1 - oldSpoke2Angle)/samplingTime;
-    #endif
-
-  sensors_event_t accel, gyro, mag;
-  accelerometer->getEvent(&accel);
-  gyroscope->getEvent(&gyro);
-  magnetometer->getEvent(&mag);
-
-  cal.calibrate(mag);
-  cal.calibrate(accel);
-  cal.calibrate(gyro);
-  
-  //Update torso angular velocity
-  float torsoOmega = gyro.gyro.x;
-
-  // Compute the angular acceleration from the dynamics inorder to shift the linear acceleration at the COM
-  //find shifted linear acceleration
-  
-  float alpha_x = (torsoOmega - oldTorsoOmega)/samplingTime;
-  auto acc_COM = comAcceleration(accel, gyro, alpha_x);
-
-  // Gyroscope needs to be converted from Rad/s to Degree/s
-  // the rest are not unit-important
-  gx = gyro.gyro.x * SENSORS_RADS_TO_DPS;
-  gy = gyro.gyro.y * SENSORS_RADS_TO_DPS;
-  gz = gyro.gyro.z * SENSORS_RADS_TO_DPS;
-
-  // Update the SensorFusion filter
-  filter.update(gx, gy, gz, 
-                acc_COM[0], acc_COM[1], acc_COM[2], 
-                mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
-
-  float torsoRoll    = filter.getRoll() * 1.0f/SENSORS_RADS_TO_DPS;
-  float torsoHeading = filter.getYaw() * 1.0f/SENSORS_RADS_TO_DPS;
-  float torsoPitch   = filter.getPitch() * 1.0f/SENSORS_RADS_TO_DPS;
-
-  oldTorsoOmega = torsoOmega;
-  oldSpoke1Angle = encPos0;
-  oldSpoke2Angle = encPos1; 
-  oldSpokeSpeed = encVel0;
-
-#if defined(AHRS_DEBUG_OUTPUT)
-  Serial.print("Orientation: ");
-  Serial.print(torsoHeading*SENSORS_RADS_TO_DPS);
-  Serial.print(", ");
-  Serial.print(torsoPitch*SENSORS_RADS_TO_DPS);
-  Serial.print(", ");
-  Serial.println(torsoRoll*SENSORS_RADS_TO_DPS);
-  Serial.print("Angular velocities: ");
-  Serial.println(torsoOmega*SENSORS_RADS_TO_DPS);
-#endif
-
-  sensorStates.position_length = 3;
-  sensorStates.velocity_length = 3;
-  float sensorPosition[3] = 
-      {
-      torsoRoll, encPos0, encPos1,
-      };
-  float sensorVelocity[3] = 
-      {
-      torsoOmega, encVel0, encVel1
-    };
-
-  sensorStates.position = sensorPosition;
-  sensorStates.velocity = sensorVelocity;
-  sensors.publish(&sensorStates);
-
-}
-
-void calibrateMotor(bool motornum) {
-  char c = motornum+'0';
-  int requested_state;
-
-  requested_state = AXIS_STATE_MOTOR_CALIBRATION;
-  Serial << "Axis" << c << ": Requesting state " << requested_state << '\n';
-  if(!ODrive.run_state(motornum, requested_state, true)) return;
-
-  requested_state = AXIS_STATE_ENCODER_OFFSET_CALIBRATION;
-  Serial << "Axis" << c << ": Requesting state " << requested_state << '\n';
-  if(!ODrive.run_state(motornum, requested_state, true, 25.0f)) return;
-
-  requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL;
-  Serial << "Axis" << c << ": Requesting state " << requested_state << '\n';
-  if(!ODrive.run_state(motornum, requested_state, false /*don't wait*/)) return;
 }

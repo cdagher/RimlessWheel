@@ -27,7 +27,7 @@ Hd = FastChain(
     )
 
 npbc = MLBasedESC.NeuralPBC(6, Hd)
-ps = BSON.load("./saved_weights/deterministic_hardware_6-8-8-7-7-1_elu.bson")[:param]
+ps = BSON.load("/home/bsurobotics/repos/RimlessWheel/julia_ws/catkin_ws/src/julia_pkg/src/saved_weights/hardware_even_688771elu.bson")[:param]
 
 function initialState(ϕ0, θ0, ϕ0dot, θ0dot)
     @assert pi-α <= θ0 <= pi+α "Give an initial spoke angle for the spoke in contact. This will help set the rimless wheel in contact with the surface"
