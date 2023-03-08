@@ -49,11 +49,14 @@ function update_state!(msg::sensor_msgs.msg.JointState, state::Vector)
     state[2] = pi + msg.position[2]       #spokes
     state[3] = msg.velocity[1]
     state[4] = msg.velocity[2]
+    state[5] = pi + msg.position[3] #spokes2
+    state[6] = msg.velocity[3]
 end
+
 
 function main()
     init_node("nn_controller")
-    state = zeros(Float32,4)
+    state = zeros(Float32,6)
     sensorData = Vector{Vector{Float32}}()
     pub = Publisher{JointState}("/torso_command", queue_size=1)
     sub = Subscriber{JointState}("/sensors", update_state!, (state,), queue_size=1)
@@ -68,14 +71,14 @@ function main()
     while !is_shutdown()
         torque_msg.header = std_msgs.msg.Header()
         torque_msg.header.stamp = RobotOS.now()
-        push!(sensorData, state)
-        torque = MLBasedESC.controller(npbc, inputLayer(state), ps)
+        torque = MLBasedESC.controller(npbc, inputLayer(state[1:4]), ps)
         torque_msg.effort = zeros(1)
         torque_msg.effort[1] = torque
         publish(pub, torque_msg)
+        push!(sensorData, state)
         rossleep(loop_rate)
     end
-    BSON.@save "/home/bsurobotics/repos/RimlessWheel/julia_ws/catkin_ws/src/julia_pkg/src/hardware_data/sensor_data.bson" sensorData
+    BSON.@save "/home/bsurobotics/repos/RimlessWheel/julia_ws/catkin_ws/src/julia_pkg/src/hardware_data/deterministic_sensor_data.bson" sensorData
     safe_shutdown_hack()
 end
 
