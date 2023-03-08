@@ -1,7 +1,9 @@
 [deps]
 BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
 DiffEqFlux = "aae7a2af-3d4f-5e19-a356-7da93b79d9d0"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LogExpFunctions = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
 MLBasedESC = "0d2b134a-22b1-4965-bb14-6de4eebc6429"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 RobotOS = "22415677-39a4-5241-a37a-00beabbbdae8"
