@@ -96,6 +96,7 @@ const float l2 = 0.06f;
 const float I1 = 0.0885f/2.0f;
 const float I2 = m2*l2*l2/3.0f;
 const float mt = m1 + m2;
+const float W = 0.026f;
 const float g  = 9.81f;
 const float incline = 0.0f; 
 const float k = 10.0f;
@@ -111,6 +112,7 @@ float torque0 = 0.0;
 float torque1 = 0.0;
 float enc0Offset = 0.0;
 float enc1Offset = 0.0;
+float yawOffset = 0.0;
 
 uint32_t timestamp;
 bool impactOccurredBefore = false;
@@ -181,15 +183,20 @@ void setup() {
     // }
     
     auto spokeStates = readEncoder();
+    auto torsoStates = readIMU();
     delay(250);
     enc0Offset = spokeStates[0];
     enc1Offset = spokeStates[1];
+    yawOffset = torsoStates[2];
 
     #if defined(TORQUE_CONTROL)
+      // int axis0 = 0;
+      // int axis1 = 1;
       for (int axis = 0; axis < 2; ++axis) {
         odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
         odriveSerial << "w axis" << axis << ".motor.config.torque_constant " << 8.23 / 150.0 << '\n';
         odriveSerial << "w axis" << axis << ".motor.controller.enable_torque_mode_vel_limit = False" << '\n';
+        // odriveSerial << "w axis" << axis1 << ".controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
       }
     #endif
 
@@ -227,17 +234,23 @@ void computeTorque(const float* torsoStates, const float* spokeStates){
   if (estop()){
       brake();
       while (estop()) {
+        for (int axis = 0; axis < 2; axis++) {
+          odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
+        }
+        commandTorque(0, 0);
+        commandTorque(1, 0);
+
         auto getSpokeStates = readEncoder();
-        Serial.print("Sensor: ");
-        Serial.print(getSpokeStates[0]);
-        Serial.print(", ");
-        Serial.print(getSpokeStates[1]);
-        Serial.print(", ");
-        Serial.print("Error: ");
-        Serial.println(0.5*(getSpokeStates[0] - getSpokeStates[1]));
+        auto getTorsoStates = readIMU();
+        publishSensorStates(getTorsoStates, getSpokeStates);
       }
-      for (int axis = 0; axis < 2; axis++) {
+      // int axis0 = 0;
+      // int axis1 = 1;
+      for (int axis = 0; axis < 2; ++axis) {
         odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
+        // odriveSerial << "w axis" << axis0 << ".motor.config.torque_constant " << 8.23 / 150.0 << '\n';
+        // odriveSerial << "w axis" << axis0 << ".motor.controller.enable_torque_mode_vel_limit = False" << '\n';
+        // odriveSerial << "w axis" << axis1 << ".controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
       }
     }
   else if (oldTorsoOmega >= 1.0*M_PI){
@@ -249,7 +262,10 @@ void computeTorque(const float* torsoStates, const float* spokeStates){
   else{
 
     commandTorque(0, -torque0);
-    commandTorque(1, torque1 + 0.0*(sinf(spokeStates[0]) - sinf(spokeStates[1])));
+    // float omega_desired = -0.0*(sinf(torsoStates[2]));
+    // ODrive.SetVelocity(1, (spokeStates[2] + W/2.0/l1*omega_desired)); //  spokeStates[2] = thetadotLeft
+    // ODrive.SetVelocity(1, -spokeStates[2] ); //  spokeStates[2] = thetadotLeft
+    commandTorque(1, 1.0*torque1);
   }
 }
 
@@ -259,15 +275,16 @@ void receiveJointState(const sensor_msgs::JointState &msg) {
 
       ///////////// for neural net //////////////
 
-      // float torque = msg.effort[0];
-      // Serial.print("Received torque command: ");
-      // Serial.print(torque);
-      // torque0 = torque;
-      // torque1 = torque;
+      torque0 = msg.effort[0];
+      // torque1 = msg.effort[1];
+      torque1 = torque0;
+      Serial.print("Received torque command: ");
+      Serial.print(torque0);
+      Serial.print(torque1);
 
       ///////////// for joystick ////////////////////
-      torque0 = msg.velocity[0];
-      torque1 = torque0;
+      // torque0 = msg.velocity[0];
+      // torque1 = torque0;
 
     #else
     #if defined(ODRIVE_CONNECTED)
@@ -364,11 +381,9 @@ float* readEncoder(){
   for(int i=0; i <= 1; i++){
     spokeStates[0] = -1.0*ODrive.GetPosition(0) - enc0Offset;
     spokeStates[1] = ODrive.GetPosition(1) - enc1Offset;
+    // spokeStates[2] = ODrive.GetVelocity(0);
+    // spokeStates[3] = ODrive.GetVelocity(1);
   }
-
-  //TODO: test GetVelocity
-  // encVel0 = ODrive.GetVelocity(0);
-  // encVel1 = ODrive.GetVelocity(1);
 
   spokeStates[2] = (spokeStates[0] - oldSpoke1Angle)/samplingTime;
   spokeStates[3] = (spokeStates[1] - oldSpoke2Angle)/samplingTime;
@@ -381,7 +396,7 @@ float* readEncoder(){
 
 float* readIMU(){
 
-  static float torsoStates[2]; 
+  static float torsoStates[3]; 
 
   //All angles are given in radians.
   sensors_event_t accel, gyro, mag;
@@ -415,8 +430,8 @@ float* readIMU(){
                 mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
 
   torsoStates[0] = filter.getRoll() * 1.0f/SENSORS_RADS_TO_DPS;
-  // float torsoHeading = filter.getYaw() * 1.0f/SENSORS_RADS_TO_DPS;
-  // float torsoPitch   = filter.getPitch() * 1.0f/SENSORS_RADS_TO_DPS;
+  torsoStates[2] = filter.getYaw() * 1.0f/SENSORS_RADS_TO_DPS - yawOffset;
+  // torsoStates[2]   = filter.getPitch() * 1.0f/SENSORS_RADS_TO_DPS - yawOffset;
 
   oldTorsoOmega = torsoStates[1];
 
@@ -431,14 +446,17 @@ void publishSensorStates(const float* torsoStates, const float* spokeStates) {
   float encVel1 = spokeStates[3];
   float torsoRoll = torsoStates[0];
   float torsoOmega = torsoStates[1];
+  float yaw = torsoStates[2];
 
   #if defined(AHRS_DEBUG_OUTPUT)
     Serial.print("Sensor: ");
     Serial.print(torsoRoll);
     Serial.print(", ");
-    Serial.print( encPos0);
+    Serial.print(encPos0);
     Serial.print(", ");
-    Serial.println(encPos1);
+    Serial.print(encPos1);
+    Serial.print(", ");
+    Serial.println(yaw);
     Serial.print("Angular velocities: ");
     Serial.println(torsoOmega);
     Serial.print(", ");
@@ -447,11 +465,11 @@ void publishSensorStates(const float* torsoStates, const float* spokeStates) {
     Serial.println(encVel1);
   #endif
 
-  sensorStates.position_length = 3;
+  sensorStates.position_length = 4;
   sensorStates.velocity_length = 3;
-  float sensorPosition[3] = 
+  float sensorPosition[4] = 
       {
-      torsoRoll, encPos0, encPos1,
+      torsoRoll, encPos0, encPos1, yaw
       };
   float sensorVelocity[3] = 
       {
