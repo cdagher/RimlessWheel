@@ -2,7 +2,7 @@
     <arg name="controller" default="nn_controller" />
     
     <group if="$(eval controller == 'nn_controller')">
-        <node name="nn_controller" pkg="julia_pkg" type="bayesianPBC.jl"/>
+        <node name="nn_controller" pkg="julia_pkg" type="evaluatePbc.jl"/>
     </group>
 
     <!-- <group if="$(eval controller == 'joystick')">

@@ -17,6 +17,7 @@ const l2  = 0.06f0                  #torso
 const k   = 10
 const α   = Float32(360.0/k/2.0 * pi/180.0)
 const DEG_TO_RAD = pi/180.0
+const satu = 1.5f0
 
 inputLayer(x) = [cos(x[1]), sin(x[1]), cos(x[2]), sin(x[2]), x[3], x[4]]        #x[1] = torso, x[2] = spoke
 
@@ -51,7 +52,7 @@ function marginalize(state::Vector{T}, param; sampleNum=5) where {T<:Real}
     effort = 0.0f0
     for i in 1:sampleNum
         w = rand(getq(param))
-        effort += MLBasedESC.controller(npbc, inputLayer(state), w)
+        effort += clamp(MLBasedESC.controller(npbc, inputLayer(state), w), -satu, satu)
     end
 
     return effort/sampleNum
@@ -74,11 +75,11 @@ end
 
 function update_state!(msg::sensor_msgs.msg.JointState, state::Vector)
     state[1] = msg.position[1]       #torso
-    state[2] = pi + msg.position[2]     #spoke0
+    state[2] = pi - abs(msg.position[2])     #spoke0
     state[3] = msg.velocity[1]	 #torso
-    state[4] = msg.velocity[2]	#spoke0
-    state[5] = pi + msg.position[3] 	#spoke1
-    state[6] = msg.velocity[3]	#spoke1
+    state[4] = -abs(msg.velocity[2])	#spoke0
+    state[5] = pi - abs(msg.position[3]) 	#spoke1
+    state[6] = -abs(msg.velocity[3])	#spoke1
     state[7] = msg.position[4] 	#yaw
 end
 
@@ -98,7 +99,7 @@ function main()
     @info "ROS node initialized. Loading models..."
 
     x0 = initialState(0.0f0, pi, 0.0f0, 0.0f0)
-    torque = marginalize(x0, ps; sampleNum=5)
+    torque = marginalize(x0, ps; sampleNum=10)
 
     @info "Model loaded. Spinning ROS..."
     loop_rate = Rate(100.0)
@@ -107,7 +108,7 @@ function main()
         torque_msg.header = std_msgs.msg.Header()
         torque_msg.header.stamp = RobotOS.now()
         spoke0, spoke1 = isolateSpokeStates(state)
-        torque = 2.0f0*marginalize(spoke0, ps; sampleNum=10)
+        torque = 1.0f0*marginalize(spoke0, ps; sampleNum=10)
         # torque = map(state, ps)
         torque_msg.effort = zeros(1)
         torque_msg.effort[1] = torque

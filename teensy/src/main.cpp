@@ -102,6 +102,7 @@ const float incline = 0.0f;
 const float k = 10.0f;
 const float alpha = 360.0f/k/2.0f * M_PI/180.0f;
 const float Kv = 0.13f;
+const float gearRatio = 1.0f/6.0f;
 
 const float samplingTime = 1.0f/FILTER_UPDATE_RATE_HZ;
 float oldTorsoOmega = 0.0f;
@@ -253,19 +254,10 @@ void computeTorque(const float* torsoStates, const float* spokeStates){
         // odriveSerial << "w axis" << axis1 << ".controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
       }
     }
-  else if (oldTorsoOmega >= 1.0*M_PI){
-    brake();
-    for (int axis = 0; axis < 2; axis++) {
-      odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
-    }
-  }
   else{
 
-    commandTorque(0, -torque0);
-    // float omega_desired = -0.0*(sinf(torsoStates[2]));
-    // ODrive.SetVelocity(1, (spokeStates[2] + W/2.0/l1*omega_desired)); //  spokeStates[2] = thetadotLeft
-    // ODrive.SetVelocity(1, -spokeStates[2] ); //  spokeStates[2] = thetadotLeft
-    commandTorque(1, 1.0*torque1);
+    commandTorque(0, -3.0f*gearRatio*torque0);
+    commandTorque(1, 3.0f*gearRatio*torque1);
   }
 }
 
@@ -379,8 +371,8 @@ float* readEncoder(){
 
   static float spokeStates[4];
   for(int i=0; i <= 1; i++){
-    spokeStates[0] = -1.0*ODrive.GetPosition(0) - enc0Offset;
-    spokeStates[1] = ODrive.GetPosition(1) - enc1Offset;
+    spokeStates[0] = -gearRatio*ODrive.GetPosition(0) - enc0Offset;
+    spokeStates[1] = gearRatio*ODrive.GetPosition(1) - enc1Offset;
     // spokeStates[2] = ODrive.GetVelocity(0);
     // spokeStates[3] = ODrive.GetVelocity(1);
   }
@@ -407,14 +399,12 @@ float* readIMU(){
   cal.calibrate(mag);
   cal.calibrate(accel);
   cal.calibrate(gyro);
-  
-  //Update torso angular velocity
-  torsoStates[1] = gyro.gyro.x;
+
 
   // Compute the angular acceleration from the dynamics inorder to shift the linear acceleration at the COM
   //find shifted linear acceleration
   
-  float alpha_x = (torsoStates[1] - oldTorsoOmega)/samplingTime;
+  float alpha_x = (gyro.gyro.x - (-1.0f*oldTorsoOmega))/samplingTime;
   auto acc_COM = comAcceleration(accel, gyro, alpha_x);
 
   // Gyroscope needs to be converted from Rad/s to Degree/s
@@ -429,10 +419,10 @@ float* readIMU(){
                 acc_COM[0], acc_COM[1], acc_COM[2], 
                 mag.magnetic.x, mag.magnetic.y, mag.magnetic.z);
 
-  torsoStates[0] = filter.getRoll() * 1.0f/SENSORS_RADS_TO_DPS;
+  torsoStates[0] = -filter.getRoll() * 1.0f/SENSORS_RADS_TO_DPS;
+  torsoStates[1] = -gyro.gyro.x;
   torsoStates[2] = filter.getYaw() * 1.0f/SENSORS_RADS_TO_DPS - yawOffset;
   // torsoStates[2]   = filter.getPitch() * 1.0f/SENSORS_RADS_TO_DPS - yawOffset;
-
   oldTorsoOmega = torsoStates[1];
 
   return torsoStates;
@@ -465,8 +455,11 @@ void publishSensorStates(const float* torsoStates, const float* spokeStates) {
     Serial.println(encVel1);
   #endif
 
+  sensorStates.header = std_msgs::Header();
+  sensorStates.header.stamp = ros::Time::now();
   sensorStates.position_length = 4;
   sensorStates.velocity_length = 3;
+
   float sensorPosition[4] = 
       {
       torsoRoll, encPos0, encPos1, yaw
