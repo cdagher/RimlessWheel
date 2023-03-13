@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ros.h>
+#include <ros/time.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Int64MultiArray.h>
 #include <sensor_msgs/JointState.h>
@@ -10,6 +11,7 @@
 #include <Adafruit_Sensor_Calibration.h>
 #include <Adafruit_AHRS.h>
 #include <cassert> 
+#include <filters.h>
 
 Adafruit_Sensor *accelerometer, *gyroscope, *magnetometer;
 
@@ -70,10 +72,10 @@ int64_t readMotorErrors(int motor_number);
 int64_t readAxisErrors(int axis_number);
 int64_t readEncoderErrors(int encoder_number);
 int64_t readControllerErrors(int controller_number);
-float* readEncoder();
+float* readEncoder(float* torsoStates);
 float* readIMU();
 void commandTorque(int axis, float torque);
-void computeTorque(const float* torsoStates, const float* spokeStates );
+void computeTorque(const float* torsoStates, const float* spokeStates);
 
 Adafruit_Mahony filter;  // fastest/smalleset
 
@@ -117,6 +119,9 @@ float yawOffset = 0.0;
 
 uint32_t timestamp;
 bool impactOccurredBefore = false;
+
+IIR::ORDER  order  = IIR::ORDER::OD3; // Order (OD1 to OD4)
+Filter lpf = Filter(30.0, samplingTime, order);
 
 void setup() {
 
@@ -177,27 +182,20 @@ void setup() {
     // calibrate the motors
     calibrateMotor(0);
     calibrateMotor(1);
-
-    // for (int axis = 0; axis < 2; ++axis) {
-    //   odriveSerial << "w axis" << axis << ".controller.config.control_mode " << AXIS_STATE_CLOSED_LOOP_CONTROL << '\n';
-    //   odriveSerial << "w axis" << axis << ".controller.input_pos = 0 " << '\n'; 
-    // }
     
-    auto spokeStates = readEncoder();
     auto torsoStates = readIMU();
+    auto spokeStates = readEncoder(torsoStates);
+  
     delay(250);
     enc0Offset = spokeStates[0];
     enc1Offset = spokeStates[1];
     yawOffset = torsoStates[2];
 
     #if defined(TORQUE_CONTROL)
-      // int axis0 = 0;
-      // int axis1 = 1;
       for (int axis = 0; axis < 2; ++axis) {
         odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
         odriveSerial << "w axis" << axis << ".motor.config.torque_constant " << 8.23 / 150.0 << '\n';
         odriveSerial << "w axis" << axis << ".motor.controller.enable_torque_mode_vel_limit = False" << '\n';
-        // odriveSerial << "w axis" << axis1 << ".controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
       }
     #endif
 
@@ -217,7 +215,7 @@ void loop() {
 
   timestamp = millis();
   auto torsoStates = readIMU();
-  auto getSpokeStates = readEncoder();
+  auto spokeStates = readEncoder(torsoStates);
 
   #if defined(ODRIVE_CONNECTED)
     if (readErrors() != 0) {
@@ -225,9 +223,10 @@ void loop() {
       odriveErrors.publish(&errorStates);
     }
   #endif
-  publishSensorStates(torsoStates, getSpokeStates);
 
-  computeTorque(torsoStates, getSpokeStates);
+  publishSensorStates(torsoStates, spokeStates);
+
+  computeTorque(torsoStates, spokeStates);
   nh.spinOnce();
 }
 
@@ -235,23 +234,14 @@ void computeTorque(const float* torsoStates, const float* spokeStates){
   if (estop()){
       brake();
       while (estop()) {
-        for (int axis = 0; axis < 2; axis++) {
-          odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
-        }
+
         commandTorque(0, 0);
         commandTorque(1, 0);
 
-        auto getSpokeStates = readEncoder();
         auto getTorsoStates = readIMU();
+        auto getSpokeStates = readEncoder(getTorsoStates);
+
         publishSensorStates(getTorsoStates, getSpokeStates);
-      }
-      // int axis0 = 0;
-      // int axis1 = 1;
-      for (int axis = 0; axis < 2; ++axis) {
-        odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
-        // odriveSerial << "w axis" << axis0 << ".motor.config.torque_constant " << 8.23 / 150.0 << '\n';
-        // odriveSerial << "w axis" << axis0 << ".motor.controller.enable_torque_mode_vel_limit = False" << '\n';
-        // odriveSerial << "w axis" << axis1 << ".controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
       }
     }
   else{
@@ -328,12 +318,8 @@ bool estop(){
 }
 
 void brake(){
-  for (int axis = 0; axis < 2; ++axis) {
-    odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_VELOCITY_CONTROL << '\n';
-  }
-  ODrive.SetVelocity(0, 0);
-  ODrive.SetVelocity(1, 0);
-   
+  commandTorque(0, 0);
+  commandTorque(1, 0);
 }
 
 float* cross(float x[3], float y[3]){
@@ -367,18 +353,18 @@ float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro
   return acc_COM;
 }
 
-float* readEncoder(){
+float* readEncoder(float* torsoStates){
 
   static float spokeStates[4];
   for(int i=0; i <= 1; i++){
-    spokeStates[0] = -gearRatio*ODrive.GetPosition(0) - enc0Offset;
-    spokeStates[1] = gearRatio*ODrive.GetPosition(1) - enc1Offset;
+    spokeStates[0] = (-gearRatio*ODrive.GetPosition(0) - enc0Offset) - (-torsoStates[1]);
+    spokeStates[1] = (gearRatio*ODrive.GetPosition(1) - enc1Offset ) - (torsoStates[1]) ;
     // spokeStates[2] = ODrive.GetVelocity(0);
     // spokeStates[3] = ODrive.GetVelocity(1);
   }
 
-  spokeStates[2] = (spokeStates[0] - oldSpoke1Angle)/samplingTime;
-  spokeStates[3] = (spokeStates[1] - oldSpoke2Angle)/samplingTime;
+  spokeStates[2] = lpf.filterIn((spokeStates[0] - oldSpoke1Angle)/samplingTime);
+  spokeStates[3] = lpf.filterIn((spokeStates[1] - oldSpoke2Angle)/samplingTime);
   oldSpoke1Angle = spokeStates[0] ;
   oldSpoke2Angle = spokeStates[1]; 
   oldSpokeSpeed = spokeStates[2];
@@ -456,7 +442,7 @@ void publishSensorStates(const float* torsoStates, const float* spokeStates) {
   #endif
 
   sensorStates.header = std_msgs::Header();
-  sensorStates.header.stamp = ros::Time::now();
+  sensorStates.header.stamp = nh.now();
   sensorStates.position_length = 4;
   sensorStates.velocity_length = 3;
 

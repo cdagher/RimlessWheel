@@ -54,27 +54,16 @@ function update_state!(msg::sensor_msgs.msg.JointState, state::Vector)
     # state[7] = msg.position[4] 	#yaw
 
     state[1] = msg.position[1]       #torso
-    state[2] = pi - abs(msg.position[2] )    #spoke0
+    state[2] = pi + msg.position[2]     #spoke0
     state[3] = msg.velocity[1]	 #torso
-    state[4] = -abs(msg.velocity[2])	#spoke0
-    state[5] = pi - abs(msg.position[3]) 	#spoke1
-    state[6] = -abs(msg.velocity[3])	#spoke1
+    state[4] = msg.velocity[2]	#spoke0
+    state[5] = pi + msg.position[3] 	#spoke1
+    state[6] = msg.velocity[3]	#spoke1
     state[7] = msg.position[4] 	#yaw
 end
 
 function isolateSpokeStates(state)
-    # wrappedStates = deepcopy(state)
-    # wrappedStates[1] = state[1]       #torso
-    # wrappedStates[2] = pi - abs(state[2])     #spoke0
-    # wrappedStates[3] = state[3]	 #torso
-    # wrappedStates[4] = -abs(state[4])  #spoke0
-    # wrappedStates[5] = pi - abs(state[5]) 	#spoke1
-    # wrappedStates[6] = -abs(state[6])	#spoke1
-    # wrappedStates[7] = state[7] 	#yaw
     
-    # spoke0 = wrappedStates[1:4]
-    # spoke1 = [wrappedStates[1], wrappedStates[5], wrappedStates[3], wrappedStates[6]]
-
     spoke0 = state[1:4]
     spoke1 = [state[1], state[5], state[3], state[6]]
 
