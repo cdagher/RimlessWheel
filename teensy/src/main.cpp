@@ -175,7 +175,6 @@ void setup() {
       odriveSerial << "w axis" << axis << ".error " << 0 << '\n';
       odriveSerial << "w axis" << axis << ".controller.config.vel_limit " << MOTOR_VELOCITY_LIMIT << '\n';
       odriveSerial << "w axis" << axis << ".motor.config.current_lim " << MOTOR_CURRENT_LIMIT << '\n';
-
       // This ends up writing something like "w axis0.motor.config.current_lim 10.0\n"
     }
 
@@ -183,6 +182,10 @@ void setup() {
     calibrateMotor(0);
     calibrateMotor(1);
     
+    delay(5000);
+    for (int axis = 0; axis < 2; ++axis) {
+        odriveSerial << "w axis" << axis << ".motor.config.startup_closed_loop_control = False" << '\n';
+    }
     auto torsoStates = readIMU();
     auto spokeStates = readEncoder(torsoStates);
   
@@ -209,25 +212,25 @@ void setup() {
 
 void loop() { 
 
-  if ((millis() - timestamp) < (1000*samplingTime)) {
-    return;
-  }
-
-  timestamp = millis();
   auto torsoStates = readIMU();
   auto spokeStates = readEncoder(torsoStates);
-
-  #if defined(ODRIVE_CONNECTED)
-    if (readErrors() != 0) {
-      // TODO: clear non-critical errors
-      odriveErrors.publish(&errorStates);
-    }
-  #endif
-
   publishSensorStates(torsoStates, spokeStates);
 
-  computeTorque(torsoStates, spokeStates);
+  if ((millis() - timestamp) >= (1000*samplingTime)) {
+
+    timestamp = millis();
+    
+    #if defined(ODRIVE_CONNECTED)
+      if (readErrors() != 0) {
+        // TODO: clear non-critical errors
+        odriveErrors.publish(&errorStates);
+      }
+    #endif
+
+    computeTorque(torsoStates, spokeStates);
+  }
   nh.spinOnce();
+
 }
 
 void computeTorque(const float* torsoStates, const float* spokeStates){
@@ -246,8 +249,8 @@ void computeTorque(const float* torsoStates, const float* spokeStates){
     }
   else{
 
-    commandTorque(0, -3.0f*gearRatio*torque0);
-    commandTorque(1, 3.0f*gearRatio*torque1);
+    commandTorque(0, -torque0);
+    commandTorque(1, torque1);
   }
 }
 
@@ -356,9 +359,9 @@ float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro
 float* readEncoder(float* torsoStates){
 
   static float spokeStates[4];
-  for(int i=0; i <= 1; i++){
-    spokeStates[0] = (-gearRatio*ODrive.GetPosition(0) - enc0Offset) - (-torsoStates[1]);
-    spokeStates[1] = (gearRatio*ODrive.GetPosition(1) - enc1Offset ) - (torsoStates[1]) ;
+  for(int i=0; i <= 3; i++){
+    spokeStates[0] = (ODrive.GetPosition(0) - enc0Offset)  + torsoStates[0];
+    spokeStates[1] = (-ODrive.GetPosition(1) - enc1Offset ) + torsoStates[0];
     // spokeStates[2] = ODrive.GetVelocity(0);
     // spokeStates[3] = ODrive.GetVelocity(1);
   }
@@ -432,6 +435,10 @@ void publishSensorStates(const float* torsoStates, const float* spokeStates) {
     Serial.print(", ");
     Serial.print(encPos1);
     Serial.print(", ");
+    // Serial.print(encPos0 - (-torsoRoll));
+    // Serial.print(", ");
+    // Serial.print(encPos1 - (torsoRoll));
+    // Serial.print(", ");
     Serial.println(yaw);
     Serial.print("Angular velocities: ");
     Serial.println(torsoOmega);
