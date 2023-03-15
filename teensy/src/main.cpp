@@ -181,11 +181,21 @@ void setup() {
     // calibrate the motors
     calibrateMotor(0);
     calibrateMotor(1);
-    
+
     delay(5000);
+
+    #if defined(TORQUE_CONTROL)
+      for (int axis = 0; axis < 2; ++axis) {
+        odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
+        odriveSerial << "w axis" << axis << ".motor.config.torque_constant " << 8.23 / 210.0 << '\n';
+        odriveSerial << "w axis" << axis << ".motor.controller.enable_torque_mode_vel_limit = False" << '\n';
+      }
+    #endif
+
     for (int axis = 0; axis < 2; ++axis) {
         odriveSerial << "w axis" << axis << ".motor.config.startup_closed_loop_control = False" << '\n';
     }
+
     auto torsoStates = readIMU();
     auto spokeStates = readEncoder(torsoStates);
   
@@ -194,13 +204,6 @@ void setup() {
     enc1Offset = spokeStates[1];
     yawOffset = torsoStates[2];
 
-    #if defined(TORQUE_CONTROL)
-      for (int axis = 0; axis < 2; ++axis) {
-        odriveSerial << "w axis" << axis << ".controller.config.control_mode " << CONTROL_MODE_TORQUE_CONTROL << '\n';
-        odriveSerial << "w axis" << axis << ".motor.config.torque_constant " << 8.23 / 150.0 << '\n';
-        odriveSerial << "w axis" << axis << ".motor.controller.enable_torque_mode_vel_limit = False" << '\n';
-      }
-    #endif
 
   #endif
 
@@ -212,14 +215,14 @@ void setup() {
 
 void loop() { 
 
-  auto torsoStates = readIMU();
-  auto spokeStates = readEncoder(torsoStates);
-  publishSensorStates(torsoStates, spokeStates);
-
   if ((millis() - timestamp) >= (1000*samplingTime)) {
 
     timestamp = millis();
     
+    auto torsoStates = readIMU();
+    auto spokeStates = readEncoder(torsoStates);
+    publishSensorStates(torsoStates, spokeStates);
+
     #if defined(ODRIVE_CONNECTED)
       if (readErrors() != 0) {
         // TODO: clear non-critical errors
@@ -246,11 +249,20 @@ void computeTorque(const float* torsoStates, const float* spokeStates){
 
         publishSensorStates(getTorsoStates, getSpokeStates);
       }
+
+      //When the encoder wraps, and you switch the Estop off, it starts from configurations not visited by the training. So, unwrap it. 
+
+      enc0Offset = 0.0f;
+      enc1Offset = 0.0f;
+      auto getTorsoStates = readIMU();
+      auto getSpokeStates = readEncoder(getTorsoStates);
+      enc0Offset = getSpokeStates[0];
+      enc1Offset = getSpokeStates[1];
     }
   else{
 
-    commandTorque(0, -torque0);
-    commandTorque(1, torque1);
+    commandTorque(0, -1.0f*torque0);
+    commandTorque(1, 1.0f*torque1);
   }
 }
 
@@ -359,12 +371,10 @@ float* comAcceleration(const sensors_event_t& accel, const sensors_event_t& gyro
 float* readEncoder(float* torsoStates){
 
   static float spokeStates[4];
-  for(int i=0; i <= 3; i++){
-    spokeStates[0] = (ODrive.GetPosition(0) - enc0Offset)  + torsoStates[0];
-    spokeStates[1] = (-ODrive.GetPosition(1) - enc1Offset ) + torsoStates[0];
-    // spokeStates[2] = ODrive.GetVelocity(0);
-    // spokeStates[3] = ODrive.GetVelocity(1);
-  }
+  spokeStates[0] = -abs(ODrive.GetPosition(0))*2.0f*M_PI*gearRatio - enc0Offset;
+  spokeStates[1] = -abs(ODrive.GetPosition(1))*2.0f*M_PI*gearRatio - enc1Offset;
+  // spokeStates[2] = ODrive.GetVelocity(0);
+  // spokeStates[3] = ODrive.GetVelocity(1);
 
   spokeStates[2] = lpf.filterIn((spokeStates[0] - oldSpoke1Angle)/samplingTime);
   spokeStates[3] = lpf.filterIn((spokeStates[1] - oldSpoke2Angle)/samplingTime);
