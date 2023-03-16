@@ -17,6 +17,7 @@ const l2  = 0.06f0                  #torso
 const k   = 10
 const α   = Float32(360.0/k/2.0 * pi/180.0)
 const DEG_TO_RAD = pi/180.0
+const satu = 1.0f0;
 
 inputLayer(x) = [cos(x[1]), sin(x[1]), cos(x[2]), sin(x[2]), x[3], x[4]]        #x[1] = torso, x[2] = spoke
 
@@ -27,7 +28,7 @@ Hd = FastChain(
     )
 
 npbc = MLBasedESC.NeuralPBC(6, Hd)
-ps = BSON.load("/home/bsurobotics/repos/RimlessWheel/julia_ws/catkin_ws/src/julia_pkg/src/saved_weights/hardware_even_deter_1mpers_6-8-8-7-7-1_elu.bson")[:param]
+ps = BSON.load("/home/bsurobotics/repos/RimlessWheel/julia_ws/catkin_ws/src/julia_pkg/src/saved_weights/deter_hardware_even_1mpers_6-8-8-7-7-1_elu.bson")[:param]
 
 function initialState(ϕ0, θ0, ϕ0dot, θ0dot)
     @assert pi-α <= θ0 <= pi+α "Give an initial spoke angle for the spoke in contact. This will help set the rimless wheel in contact with the surface"
@@ -45,13 +46,6 @@ function initialState(ϕ0, θ0, ϕ0dot, θ0dot)
 end
 
 function update_state!(msg::sensor_msgs.msg.JointState, state::Vector)
-    # state[1] = msg.position[1]       #torso
-    # state[2] = msg.position[2]     #spoke0
-    # state[3] = msg.velocity[1]	 #torso
-    # state[4] = msg.velocity[2]	#spoke0
-    # state[5] = msg.position[3] 	#spoke1
-    # state[6] = msg.velocity[3]	#spoke1
-    # state[7] = msg.position[4] 	#yaw
 
     state[1] = msg.position[1]       #torso
     state[2] = pi + msg.position[2]     #spoke0
@@ -72,19 +66,21 @@ end
 
 function computeTorque(spoke0)
     tau = 1.0f0*MLBasedESC.controller(npbc, inputLayer(spoke0), ps)
-    return tau 
+    return clamp(tau, -satu, satu) 
 end
 
 function main()
     init_node("nn_controller")
+    x0 = initialState(0.0f0, pi, 0.0f0, 0.0f0)
+    torque = MLBasedESC.controller(npbc, inputLayer(x0), ps)
+
     state = zeros(Float32,7)
+    state[2] = pi;
+    state[5] = pi;
     sensorData = Vector{Vector{Float32}}()
     pub = Publisher{JointState}("/torso_command", queue_size=1)
     sub = Subscriber{JointState}("/sensors", update_state!, (state,), queue_size=1)
     @info "ROS node initialized. Loading models..."
-
-    x0 = initialState(0.0f0, pi, 0.0f0, 0.0f0)
-    torque = MLBasedESC.controller(npbc, inputLayer(x0), ps)
 
     @info "Model loaded. Spinning ROS..."
     loop_rate = Rate(100.0)
