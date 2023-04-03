@@ -23,8 +23,8 @@ inputLayer(x) = [cos(x[1]), sin(x[1]), cos(x[2]), sin(x[2]), x[3], x[4]]        
 
 Hd = FastChain(
         FastDense(6, 8, elu, bias=true),
-        FastDense(8, 5, elu, bias=true),
-        FastDense(5, 1, bias=true)
+        FastDense(8, 7, elu, bias=true),
+        FastDense(7, 1, bias=true)
     )
 
 npbc = MLBasedESC.NeuralPBC(6, Hd)
@@ -118,7 +118,7 @@ function main()
         torque_msg.effort = zeros(1)
         torque_msg.effort[1] = torque
         publish(pub, torque_msg)
-        push!(sensorData, deepcopy(state))
+        # push!(sensorData, deepcopy(state))
         rossleep(loop_rate)
     end
     BSON.@save "/home/bsurobotics/repos/RimlessWheel/julia_ws/catkin_ws/src/julia_pkg/src/hardware_data/bayesian_sensor_data.bson" sensorData
